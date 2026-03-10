@@ -7,10 +7,16 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		m.hasDarkBG = msg.IsDark()
+		m.rebuildTheme()
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -19,19 +25,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Confirmation dialog intercepts all keys
-		if m.confirmMsg != "" {
-			if msg.String() == "y" || msg.String() == "Y" {
-				cmd := m.confirmFn()
-				m.confirmMsg = ""
-				m.confirmFn = nil
-				return m, cmd
-			}
-			m.confirmMsg = ""
-			m.confirmFn = nil
-			return m, nil
-		}
+		// Confirmation form intercepts all messages when active
+		// (handled below in the confirmForm block)
 
+	default:
+		// non-key, non-special messages fall through
+	}
+
+	// Forward messages to the confirm form when active.
+	if m.confirmForm != nil {
+		model, cmd := m.confirmForm.Update(msg)
+		m.confirmForm = model.(*huh.Form)
+		if m.confirmForm.State == huh.StateCompleted {
+			if m.confirmed {
+				actionCmd := m.confirmFn()
+				m.confirmForm = nil
+				m.confirmFn = nil
+				return m, tea.Batch(cmd, actionCmd)
+			}
+			m.confirmForm = nil
+			m.confirmFn = nil
+			return m, cmd
+		}
+		if m.confirmForm.State == huh.StateAborted {
+			m.confirmForm = nil
+			m.confirmFn = nil
+			return m, cmd
+		}
+		return m, cmd
+	}
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, GlobalKeys.Quit):
 			return m, tea.Quit
@@ -83,7 +108,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPanel = (m.focusedPanel + maxPanel) % (maxPanel + 1)
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Refresh):
-			m.prs = nil
 			return m, tea.Batch(m.fetchRepos(), m.fetchStatus(), m.fetchJobQueue())
 		}
 
@@ -160,7 +184,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash("Failed jobs purged", false)
 		}
 	case TickMsg:
-		m.prs = nil
+		// Don't clear existing data — let it stay visible while refreshing.
 		return m, tea.Batch(
 			m.fetchRepos(),
 			m.fetchStatus(),
@@ -229,6 +253,21 @@ func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) showConfirm(message string, fn func() tea.Cmd) tea.Cmd {
+	m.confirmed = false
+	m.confirmFn = fn
+	m.confirmForm = huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(message).
+				Affirmative("Yes").
+				Negative("No").
+				Value(&m.confirmed),
+		),
+	).WithWidth(40)
+	return m.confirmForm.Init()
+}
+
 func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	selectedPR := m.getSelectedPR()
 	if selectedPR == nil {
@@ -238,15 +277,14 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
 		pr := *selectedPR
-		m.confirmMsg = fmt.Sprintf("Merge #%d into %s?", pr.Number, pr.Base)
-		m.confirmFn = func() tea.Cmd {
+		cmd := m.showConfirm(fmt.Sprintf("Merge #%d into %s?", pr.Number, pr.Base), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
 				err := m.github.MergePR(owner, repo, pr.Number)
 				return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
-		}
-		return m, nil
+		})
+		return m, cmd
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("M"))):
 		safePRs := m.getSafePRsForSelectedRepo()
@@ -254,8 +292,7 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setFlash("No safe PRs to merge", true)
 			return m, nil
 		}
-		m.confirmMsg = fmt.Sprintf("Merge %d safe PRs?", len(safePRs))
-		m.confirmFn = func() tea.Cmd {
+		cmd := m.showConfirm(fmt.Sprintf("Merge %d safe PRs?", len(safePRs)), func() tea.Cmd {
 			var cmds []tea.Cmd
 			for _, pr := range safePRs {
 				pr := pr
@@ -266,20 +303,19 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				})
 			}
 			return tea.Batch(cmds...)
-		}
-		return m, nil
+		})
+		return m, cmd
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
 		pr := *selectedPR
-		m.confirmMsg = fmt.Sprintf("Close #%d and delete branch?", pr.Number)
-		m.confirmFn = func() tea.Cmd {
+		cmd := m.showConfirm(fmt.Sprintf("Close #%d and delete branch?", pr.Number), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
 				err := m.github.ClosePR(owner, repo, pr.Number, pr.Branch)
 				return ClosePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
-		}
-		return m, nil
+		})
+		return m, cmd
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("o"))):
 		return m, tea.ExecProcess(exec.Command("xdg-open", selectedPR.URL), nil)
@@ -309,14 +345,13 @@ func (m *Model) handleJobActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return SyncTriggeredMsg{Err: err}
 		}
 	case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
-		m.confirmMsg = "Purge all failed jobs?"
-		m.confirmFn = func() tea.Cmd {
+		cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
 			return func() tea.Msg {
 				err := m.renovate.PurgeFailedJobs()
 				return PurgeResultMsg{Err: err}
 			}
-		}
-		return m, nil
+		})
+		return m, cmd
 	}
 
 	return m, nil
@@ -334,14 +369,13 @@ func (m *Model) handleStatusActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return SyncTriggeredMsg{Err: err}
 		}
 	case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
-		m.confirmMsg = "Purge all failed jobs?"
-		m.confirmFn = func() tea.Cmd {
+		cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
 			return func() tea.Msg {
 				err := m.renovate.PurgeFailedJobs()
 				return PurgeResultMsg{Err: err}
 			}
-		}
-		return m, nil
+		})
+		return m, cmd
 	}
 
 	return m, nil

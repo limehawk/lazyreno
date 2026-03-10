@@ -20,19 +20,19 @@ func (m Model) View() tea.View {
 		return view("Loading...")
 	}
 
-	// Confirmation dialog
-	if m.confirmMsg != "" {
-		return view(ui.RenderConfirm(m.confirmMsg, m.width, m.height))
+	// Confirmation form
+	if m.confirmForm != nil {
+		return view(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.confirmForm.View()))
 	}
 
-	header := ui.RenderHeader(m.activeTab, m.width)
+	header := ui.RenderHeader(&m.theme, m.activeTab, m.width)
 
 	// Flash message line (shown above help bar when active)
 	var flashLine string
 	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
-		style := ui.SuccessText
+		style := m.theme.SuccessText
 		if m.flashIsError {
-			style = ui.ErrorText
+			style = m.theme.ErrorText
 		}
 		flashLine = style.Render(m.flashText)
 	}
@@ -72,45 +72,24 @@ func (m Model) View() tea.View {
 func (m Model) viewPRs(height int) string {
 	sidebarWidth, mainWidth, detailWidth := m.panelWidths()
 
-	// Sidebar: repo list wrapped in a panel
+	// Sidebar: repo list wrapped in a panel (list has its own title).
 	sidebar := ui.WrapListInPanel(
-		fmt.Sprintf("Repos (%d open)", len(m.repoList.Items())),
-		m.repoList.View(),
-		m.focusedPanel == 0,
-		sidebarWidth,
-		height,
+		&m.theme, "", m.repoList.View(),
+		m.focusedPanel == 0, sidebarWidth, height,
 	)
 
-	// Main: PR list wrapped in a panel
-	// Add a footer with totals.
-	prView := m.prList.View()
-	totalPRs := len(m.prs)
-	mergeableCount := 0
-	for _, pr := range m.prs {
-		if pr.Mergeable {
-			mergeableCount++
-		}
-	}
-	_ = totalPRs
-	_ = mergeableCount
-
+	// Main: PR list wrapped in a panel.
 	main := ui.WrapListInPanel(
-		"Pull Requests",
-		prView,
-		m.focusedPanel == 1,
-		mainWidth,
-		height,
+		&m.theme, "", m.prList.View(),
+		m.focusedPanel == 1, mainWidth, height,
 	)
 
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
 
 	if detailWidth > 0 {
-		detail := ui.WrapListInPanel(
-			"Details",
-			m.detailView.View(),
-			m.focusedPanel == 2,
-			detailWidth,
-			height,
+		detail := ui.RenderPanel(
+			&m.theme, "Details", m.detailView.View(),
+			m.focusedPanel == 2, detailWidth, height,
 		)
 		panels = lipgloss.JoinHorizontal(lipgloss.Top, panels, detail)
 	}
@@ -119,23 +98,22 @@ func (m Model) viewPRs(height int) string {
 }
 
 func (m Model) viewRepos(height int) string {
-	sidebarWidth := 28
-	mainWidth := m.width - sidebarWidth
-	if m.width < 80 {
+	sidebarWidth := m.width * 25 / 100
+	if sidebarWidth < 22 {
 		sidebarWidth = 22
-		mainWidth = m.width - sidebarWidth
 	}
+	if sidebarWidth > 40 {
+		sidebarWidth = 40
+	}
+	mainWidth := m.width - sidebarWidth
 
 	sidebar := ui.WrapListInPanel(
-		fmt.Sprintf("Repos (%d)", len(m.repos)),
-		m.allRepoList.View(),
-		m.focusedPanel == 0,
-		sidebarWidth,
-		height,
+		&m.theme, "", m.allRepoList.View(),
+		m.focusedPanel == 0, sidebarWidth, height,
 	)
 
 	// Main: repo info
-	mainContent := ui.Dim.Render("Select a repo")
+	mainContent := m.theme.Dim.Render("Select a repo")
 	sel := m.allRepoList.SelectedItem()
 	if sel != nil {
 		if ri, ok := sel.(AllRepoItem); ok {
@@ -148,22 +126,23 @@ func (m Model) viewRepos(height int) string {
 				}
 			}
 
-			prCountStr := ui.SuccessText.Render(fmt.Sprintf("%d", prCount))
+			prCountStr := m.theme.SuccessText.Render(fmt.Sprintf("%d", prCount))
 			if prCount > 0 {
-				prCountStr = ui.WarningText.Render(fmt.Sprintf("%d", prCount))
+				prCountStr = m.theme.WarningText.Render(fmt.Sprintf("%d", prCount))
 			}
 
 			mainContent = fmt.Sprintf(
 				"%s  %s\n%s  %s",
-				ui.Dim.Render("Repository:"),
-				ui.Bold.Render(fullName),
-				ui.Dim.Render("Open PRs:  "),
+				m.theme.Dim.Render("Repository:"),
+				m.theme.Bold.Render(fullName),
+				m.theme.Dim.Render("Open PRs:  "),
 				prCountStr,
 			)
 		}
 	}
 
 	main := ui.RenderPanel(
+		&m.theme,
 		"Repository Info",
 		mainContent,
 		m.focusedPanel == 1,
@@ -175,37 +154,37 @@ func (m Model) viewRepos(height int) string {
 }
 
 func (m Model) viewJobs(height int) string {
-	sidebarWidth := 28
-	mainWidth := m.width - sidebarWidth
-	if m.width < 80 {
+	sidebarWidth := m.width * 25 / 100
+	if sidebarWidth < 22 {
 		sidebarWidth = 22
-		mainWidth = m.width - sidebarWidth
 	}
+	if sidebarWidth > 40 {
+		sidebarWidth = 40
+	}
+	mainWidth := m.width - sidebarWidth
 
 	sidebar := ui.WrapListInPanel(
-		fmt.Sprintf("Queue (%d)", len(m.jobs)),
-		m.jobList.View(),
-		m.focusedPanel == 0,
-		sidebarWidth,
-		height,
+		&m.theme, "", m.jobList.View(),
+		m.focusedPanel == 0, sidebarWidth, height,
 	)
 
-	mainContent := ui.Dim.Render("Select a job")
+	mainContent := m.theme.Dim.Render("Select a job")
 	sel := m.jobList.SelectedItem()
 	if sel != nil {
 		if ji, ok := sel.(JobItem); ok {
 			job := ji.Job
 			mainContent = fmt.Sprintf(
 				"%s  %s\n%s  %s\n%s  %s\n\n%s  %s",
-				ui.Dim.Render("Job:   "), job.ID,
-				ui.Dim.Render("Repo:  "), ui.Bold.Render(job.Repo),
-				ui.Dim.Render("Status:"), job.Status,
-				ui.AccentText.Render("[r]"), "retry  "+ui.AccentText.Render("[p]")+" purge failed",
+				m.theme.Dim.Render("Job:   "), job.ID,
+				m.theme.Dim.Render("Repo:  "), m.theme.Bold.Render(job.Repo),
+				m.theme.Dim.Render("Status:"), job.Status,
+				m.theme.AccentText.Render("[r]"), "retry  "+m.theme.AccentText.Render("[p]")+" purge failed",
 			)
 		}
 	}
 
 	main := ui.RenderPanel(
+		&m.theme,
 		"Job Details",
 		mainContent,
 		m.focusedPanel == 1,
@@ -217,11 +196,8 @@ func (m Model) viewJobs(height int) string {
 }
 
 func (m Model) viewStatus(height int) string {
-	return ui.WrapListInPanel(
-		"System Status",
-		m.statusView.View(),
-		true,
-		m.width,
-		height,
+	return ui.RenderPanel(
+		&m.theme, "System Status", m.statusView.View(),
+		true, m.width, height,
 	)
 }

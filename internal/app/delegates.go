@@ -5,7 +5,6 @@ import (
 	"io"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/ui"
@@ -15,7 +14,9 @@ import (
 
 // --- Repo delegate (sidebar) ------------------------------------------------
 
-type repoDelegate struct{}
+type repoDelegate struct {
+	theme *ui.Theme
+}
 
 func (d repoDelegate) Height() int                              { return 1 }
 func (d repoDelegate) Spacing() int                             { return 0 }
@@ -25,32 +26,36 @@ func (d repoDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	if !ok {
 		return
 	}
-	if m.Width() <= 0 {
+	width := m.Width()
+	if width <= 0 {
 		return
 	}
 
 	selected := index == m.Index()
-	prefix := "  "
-	nameStyle := lipgloss.NewStyle()
-	countStyle := ui.Dim
-	if selected {
-		prefix = ui.AccentText.Render("● ")
-		nameStyle = ui.AccentText
-	}
 
 	countStr := fmt.Sprintf("%2d", ri.PRCount)
-	nameWidth := m.Width() - 5 // "● " (2) + " XX" (3)
+	nameWidth := width - 5 // prefix(2) + space(1) + count(2)
 	if nameWidth < 4 {
 		nameWidth = 4
 	}
 	name := ansi.Truncate(ri.Name, nameWidth, "…")
+	padded := fmt.Sprintf("%-*s", nameWidth, name) // pad plain text first
 
-	fmt.Fprintf(w, "%s%-*s %s", prefix, nameWidth, nameStyle.Render(name), countStyle.Render(countStr))
+	if selected {
+		fmt.Fprintf(w, "%s%s %s",
+			d.theme.AccentText.Render("> "),
+			d.theme.AccentText.Render(padded),
+			d.theme.Dim.Render(countStr))
+	} else {
+		fmt.Fprintf(w, "  %s %s", padded, d.theme.Dim.Render(countStr))
+	}
 }
 
 // --- All-repo delegate (Repos tab sidebar) ----------------------------------
 
-type allRepoDelegate struct{}
+type allRepoDelegate struct {
+	theme *ui.Theme
+}
 
 func (d allRepoDelegate) Height() int                              { return 1 }
 func (d allRepoDelegate) Spacing() int                             { return 0 }
@@ -60,29 +65,33 @@ func (d allRepoDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	if !ok {
 		return
 	}
-	if m.Width() <= 0 {
+	width := m.Width()
+	if width <= 0 {
 		return
 	}
 
 	selected := index == m.Index()
-	prefix := "  "
-	style := lipgloss.NewStyle()
-	if selected {
-		prefix = ui.AccentText.Render("● ")
-		style = ui.AccentText
-	}
 
-	nameWidth := m.Width() - 2
+	nameWidth := width - 2 // prefix(2)
 	if nameWidth < 4 {
 		nameWidth = 4
 	}
 	name := ansi.Truncate(ri.Name, nameWidth, "…")
-	fmt.Fprintf(w, "%s%s", prefix, style.Render(name))
+
+	if selected {
+		fmt.Fprintf(w, "%s%s",
+			d.theme.AccentText.Render("> "),
+			d.theme.AccentText.Render(name))
+	} else {
+		fmt.Fprintf(w, "  %s", name)
+	}
 }
 
 // --- PR delegate (main panel) -----------------------------------------------
 
-type prDelegate struct{}
+type prDelegate struct {
+	theme *ui.Theme
+}
 
 func (d prDelegate) Height() int                              { return 1 }
 func (d prDelegate) Spacing() int                             { return 0 }
@@ -92,17 +101,12 @@ func (d prDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	if !ok {
 		return
 	}
-	if m.Width() <= 0 {
+	width := m.Width()
+	if width <= 0 {
 		return
 	}
 
 	selected := index == m.Index()
-	prefix := "  "
-	titleStyle := lipgloss.NewStyle()
-	if selected {
-		prefix = ui.AccentText.Render("● ")
-		titleStyle = ui.AccentText
-	}
 
 	pr := pi.PR
 	age := backend.RelativeTime(pr.CreatedAt)
@@ -111,32 +115,45 @@ func (d prDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		updateType = "dep"
 	}
 
-	typeStyle := ui.Dim
+	typeStyle := d.theme.Dim
 	if updateType == "major" {
-		typeStyle = ui.WarningText
+		typeStyle = d.theme.WarningText
 	}
 
 	// Layout: "● title  type     age"
 	typeWidth := 7
 	ageWidth := 7
-	metaWidth := typeWidth + 2 + ageWidth // "  " separator + fields
-	titleWidth := m.Width() - 2 - metaWidth - 2 // prefix + meta + spacing
+	// prefix(2) + title + "  "(2) + type(7) + "  "(2) + age(7) = 20 overhead
+	titleWidth := width - 20
 	if titleWidth < 10 {
 		titleWidth = 10
 	}
 
 	title := ansi.Truncate(pr.Title, titleWidth, "…")
-	fmt.Fprintf(w, "%s%-*s  %-*s  %*s",
-		prefix,
-		titleWidth, titleStyle.Render(title),
-		typeWidth, typeStyle.Render(updateType),
-		ageWidth, ui.Dim.Render(age),
-	)
+	// Pad plain text before styling to avoid ANSI width miscalculation
+	paddedTitle := fmt.Sprintf("%-*s", titleWidth, title)
+	paddedType := fmt.Sprintf("%-*s", typeWidth, updateType)
+	paddedAge := fmt.Sprintf("%*s", ageWidth, age)
+
+	if selected {
+		fmt.Fprintf(w, "%s%s  %s  %s",
+			d.theme.AccentText.Render("> "),
+			d.theme.AccentText.Render(paddedTitle),
+			typeStyle.Render(paddedType),
+			d.theme.Dim.Render(paddedAge))
+	} else {
+		fmt.Fprintf(w, "  %s  %s  %s",
+			paddedTitle,
+			typeStyle.Render(paddedType),
+			d.theme.Dim.Render(paddedAge))
+	}
 }
 
 // --- Job delegate (Jobs tab sidebar) ----------------------------------------
 
-type jobDelegate struct{}
+type jobDelegate struct {
+	theme *ui.Theme
+}
 
 func (d jobDelegate) Height() int                              { return 1 }
 func (d jobDelegate) Spacing() int                             { return 0 }
@@ -146,34 +163,47 @@ func (d jobDelegate) Render(w io.Writer, m list.Model, index int, item list.Item
 	if !ok {
 		return
 	}
-	if m.Width() <= 0 {
+	width := m.Width()
+	if width <= 0 {
 		return
 	}
 
 	selected := index == m.Index()
-	prefix := "  "
-	if selected {
-		prefix = ui.AccentText.Render("● ")
-	}
 
 	job := ji.Job
-	statusIcon := "◌"
-	switch job.Status {
-	case "running":
-		statusIcon = ui.AccentText.Render("●")
-	case "pending":
-		statusIcon = ui.Dim.Render("◌")
-	case "failed":
-		statusIcon = ui.ErrorText.Render("✗")
-	case "success":
-		statusIcon = ui.SuccessText.Render("✓")
-	}
-
-	repoShort := ji.Title()
-	nameWidth := m.Width() - 12 // prefix + icon + space + status
+	statusLabel := job.Status
+	// prefix(2) + icon(1) + space(1) + name + space(1) + status(~8) = overhead ~13
+	statusWidth := len(statusLabel)
+	nameWidth := width - 5 - statusWidth // prefix(2) + icon(1) + 2 spaces
 	if nameWidth < 4 {
 		nameWidth = 4
 	}
-	repoShort = ansi.Truncate(repoShort, nameWidth, "…")
-	fmt.Fprintf(w, "%s%s %-*s %s", prefix, statusIcon, nameWidth, repoShort, ui.Dim.Render(job.Status))
+
+	repoShort := ansi.Truncate(ji.Title(), nameWidth, "…")
+	paddedName := fmt.Sprintf("%-*s", nameWidth, repoShort)
+
+	statusIcon := "◌"
+	switch job.Status {
+	case "running":
+		statusIcon = d.theme.AccentText.Render("●")
+	case "pending":
+		statusIcon = d.theme.Dim.Render("◌")
+	case "failed":
+		statusIcon = d.theme.ErrorText.Render("✗")
+	case "success":
+		statusIcon = d.theme.SuccessText.Render("✓")
+	}
+
+	if selected {
+		fmt.Fprintf(w, "%s%s %s %s",
+			d.theme.AccentText.Render("> "),
+			statusIcon,
+			d.theme.AccentText.Render(paddedName),
+			d.theme.Dim.Render(statusLabel))
+	} else {
+		fmt.Fprintf(w, "  %s %s %s",
+			statusIcon,
+			paddedName,
+			d.theme.Dim.Render(statusLabel))
+	}
 }

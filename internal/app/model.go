@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/config"
@@ -32,6 +33,10 @@ type Model struct {
 	width     int
 	height    int
 
+	// Adaptive theming
+	hasDarkBG bool
+	theme     ui.Theme
+
 	// Shared data
 	repos  []string
 	prs    []backend.PR
@@ -41,8 +46,9 @@ type Model struct {
 	// UI state
 	keys         KeyMap
 	help         help.Model
-	confirmMsg   string
+	confirmForm  *huh.Form
 	confirmFn    func() tea.Cmd
+	confirmed    bool
 	flashText    string
 	flashIsError bool
 	flashExpiry  time.Time
@@ -61,7 +67,7 @@ type Model struct {
 	err error
 }
 
-func newList(delegate list.ItemDelegate, title string) list.Model {
+func newList(delegate list.ItemDelegate, title string, theme *ui.Theme) list.Model {
 	l := list.New(nil, delegate, 0, 0)
 	l.Title = title
 	l.DisableQuitKeybindings()
@@ -70,9 +76,16 @@ func newList(delegate list.ItemDelegate, title string) list.Model {
 	l.SetShowFilter(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowPagination(false)
-	l.SetShowTitle(false)
-	// Remove built-in key handling for j/k so we stay consistent.
-	// The list bubble uses its own j/k by default which is what we want.
+	l.SetShowTitle(true)
+
+	// Style the title bar to match our theme — no background, accent text.
+	styles := l.Styles
+	styles.TitleBar = lipgloss.NewStyle().Padding(0, 0, 0, 0)
+	styles.Title = lipgloss.NewStyle().
+		Foreground(theme.Accent).
+		Bold(true)
+	l.Styles = styles
+
 	return l
 }
 
@@ -87,10 +100,13 @@ func NewModel(cfg *config.Config) Model {
 		gh = backend.NewGitHubClient(cfg.GitHub.Token)
 	}
 
+	// Default to dark background until we hear from the terminal.
+	theme := ui.NewTheme(true)
+
 	h := help.New()
 	s := help.DefaultDarkStyles()
-	s.ShortKey = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true)
-	s.FullKey = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true)
+	s.ShortKey = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)
+	s.FullKey = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)
 	h.Styles = s
 
 	return Model{
@@ -98,14 +114,42 @@ func NewModel(cfg *config.Config) Model {
 		renovate:    renovate,
 		github:      gh,
 		cache:       backend.NewCache(30 * time.Second),
+		hasDarkBG:   true,
+		theme:       theme,
 		keys:        GlobalKeys,
 		help:        h,
-		repoList:    newList(repoDelegate{}, "Repos"),
-		prList:      newList(prDelegate{}, "Pull Requests"),
-		allRepoList: newList(allRepoDelegate{}, "Repos"),
-		jobList:     newList(jobDelegate{}, "Queue"),
+		repoList:    newList(repoDelegate{theme: &theme}, "Repos", &theme),
+		prList:      newList(prDelegate{theme: &theme}, "Pull Requests", &theme),
+		allRepoList: newList(allRepoDelegate{theme: &theme}, "Repos", &theme),
+		jobList:     newList(jobDelegate{theme: &theme}, "Queue", &theme),
 		detailView:  viewport.New(),
 		statusView:  viewport.New(),
+	}
+}
+
+func (m *Model) rebuildTheme() {
+	m.theme = ui.NewTheme(m.hasDarkBG)
+
+	// Update help styles.
+	s := m.help.Styles
+	s.ShortKey = lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true)
+	s.FullKey = lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true)
+	m.help.Styles = s
+
+	// Update delegate theme pointers by re-creating delegates.
+	m.repoList.SetDelegate(repoDelegate{theme: &m.theme})
+	m.prList.SetDelegate(prDelegate{theme: &m.theme})
+	m.allRepoList.SetDelegate(allRepoDelegate{theme: &m.theme})
+	m.jobList.SetDelegate(jobDelegate{theme: &m.theme})
+
+	// Update list title styles.
+	titleStyle := lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true)
+	titleBar := lipgloss.NewStyle()
+	for _, l := range []*list.Model{&m.repoList, &m.prList, &m.allRepoList, &m.jobList} {
+		styles := l.Styles
+		styles.Title = titleStyle
+		styles.TitleBar = titleBar
+		l.Styles = styles
 	}
 }
 
@@ -115,6 +159,7 @@ func (m Model) Init() tea.Cmd {
 		m.fetchStatus(),
 		m.fetchJobQueue(),
 		m.tickCmd(),
+		func() tea.Msg { return tea.RequestBackgroundColor() },
 	)
 }
 
@@ -195,6 +240,7 @@ func (m *Model) rebuildRepoList() tea.Cmd {
 		fullName := m.cfg.GitHub.Owner + "/" + repo
 		items[i] = RepoItem{Name: repo, PRCount: len(prsByRepo[fullName])}
 	}
+	m.repoList.Title = fmt.Sprintf("Repos (%d open)", len(items))
 	return m.repoList.SetItems(items)
 }
 
@@ -225,6 +271,7 @@ func (m *Model) rebuildAllRepoList() tea.Cmd {
 	for i, repo := range m.repos {
 		items[i] = AllRepoItem{Name: repo}
 	}
+	m.allRepoList.Title = fmt.Sprintf("Repos (%d)", len(items))
 	return m.allRepoList.SetItems(items)
 }
 
@@ -234,6 +281,7 @@ func (m *Model) rebuildJobList() tea.Cmd {
 	for i, job := range m.jobs {
 		items[i] = JobItem{Job: job}
 	}
+	m.jobList.Title = fmt.Sprintf("Queue (%d)", len(items))
 	return m.jobList.SetItems(items)
 }
 
@@ -241,30 +289,30 @@ func (m *Model) rebuildJobList() tea.Cmd {
 func (m *Model) updateDetailView() {
 	pr := m.getSelectedPR()
 	if pr == nil {
-		m.detailView.SetContent(ui.Dim.Render("No PR selected"))
+		m.detailView.SetContent(m.theme.Dim.Render("No PR selected"))
 		return
 	}
 
-	mergeStatus := ui.ErrorText.Render("✗ conflict")
+	mergeStatus := m.theme.ErrorText.Render("✗ conflict")
 	if pr.Mergeable {
-		mergeStatus = ui.SuccessText.Render("✓ mergeable")
+		mergeStatus = m.theme.SuccessText.Render("✓ mergeable")
 	}
-	checkStatus := ui.ErrorText.Render("✗ failing")
+	checkStatus := m.theme.ErrorText.Render("✗ failing")
 	if pr.ChecksPass {
-		checkStatus = ui.SuccessText.Render("✓ passing")
+		checkStatus = m.theme.SuccessText.Render("✓ passing")
 	}
 
 	content := fmt.Sprintf("%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n\n%s merge  %s close\n%s open in browser",
-		ui.Bold.Render(fmt.Sprintf("#%d", pr.Number)),
+		m.theme.Bold.Render(fmt.Sprintf("#%d", pr.Number)),
 		pr.Title,
-		ui.Dim.Render("Branch:"), pr.Branch,
-		ui.Dim.Render("Base:  "), pr.Base,
-		ui.Dim.Render("Checks:"), checkStatus,
-		ui.Dim.Render("Merge: "), mergeStatus,
-		ui.Dim.Render("Age:   "), backend.RelativeTime(pr.CreatedAt),
-		ui.Dim.Render("Type:  "), pr.UpdateType,
-		ui.AccentText.Render("[m]"), ui.AccentText.Render("[c]"),
-		ui.AccentText.Render("[o]"),
+		m.theme.Dim.Render("Branch:"), pr.Branch,
+		m.theme.Dim.Render("Base:  "), pr.Base,
+		m.theme.Dim.Render("Checks:"), checkStatus,
+		m.theme.Dim.Render("Merge: "), mergeStatus,
+		m.theme.Dim.Render("Age:   "), backend.RelativeTime(pr.CreatedAt),
+		m.theme.Dim.Render("Type:  "), pr.UpdateType,
+		m.theme.AccentText.Render("[m]"), m.theme.AccentText.Render("[c]"),
+		m.theme.AccentText.Render("[o]"),
 	)
 
 	m.detailView.SetContent(content)
@@ -277,35 +325,35 @@ func (m *Model) updateStatusView() {
 	if m.renovate == nil {
 		lines = []string{
 			"",
-			ui.WarningText.Render("  Renovate CE not configured"),
+			m.theme.WarningText.Render("  Renovate CE not configured"),
 			"",
-			ui.Dim.Render("  Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET"),
+			m.theme.Dim.Render("  Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET"),
 		}
 	} else if m.status == nil {
-		lines = []string{"", ui.Dim.Render("  Connecting to Renovate CE...")}
+		lines = []string{"", m.theme.Dim.Render("  Connecting to Renovate CE...")}
 	} else {
 		s := m.status
-		connected := ui.SuccessText.Render("✓ connected")
+		connected := m.theme.SuccessText.Render("✓ connected")
 		uptime := s.Uptime.Truncate(time.Minute).String()
 
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("  %s %s          %s %s       %s %s",
-			ui.Dim.Render("Renovate CE"), ui.Bold.Render(s.Version),
-			ui.Dim.Render("API:"), connected,
-			ui.Dim.Render("Uptime:"), uptime))
+			m.theme.Dim.Render("Renovate CE"), m.theme.Bold.Render(s.Version),
+			m.theme.Dim.Render("API:"), connected,
+			m.theme.Dim.Render("Uptime:"), uptime))
 		lines = append(lines, fmt.Sprintf("  %s %d            %s %d",
-			ui.Dim.Render("Jobs:"), s.QueueSize,
-			ui.Dim.Render("Failed:"), s.FailedJobs))
+			m.theme.Dim.Render("Jobs:"), s.QueueSize,
+			m.theme.Dim.Render("Failed:"), s.FailedJobs))
 		lines = append(lines, "")
 
 		divWidth := m.width - 6
 		if divWidth < 0 {
 			divWidth = 0
 		}
-		lines = append(lines, ui.Dim.Render("  "+strings.Repeat("─", divWidth)))
+		lines = append(lines, m.theme.Dim.Render("  "+strings.Repeat("─", divWidth)))
 		lines = append(lines, "")
-		lines = append(lines, "  "+ui.AccentText.Render("[s]")+" sync now   "+
-			ui.AccentText.Render("[p]")+" purge failed")
+		lines = append(lines, "  "+m.theme.AccentText.Render("[s]")+" sync now   "+
+			m.theme.AccentText.Render("[p]")+" purge failed")
 	}
 
 	m.statusView.SetContent(strings.Join(lines, "\n"))
@@ -320,8 +368,8 @@ func (m *Model) resizeLists() {
 
 	sidebarWidth, mainWidth, detailWidth := m.panelWidths()
 
-	sidebarInnerW, sidebarInnerH := ui.InnerSize(sidebarWidth, bodyHeight)
-	mainInnerW, mainInnerH := ui.InnerSize(mainWidth, bodyHeight)
+	sidebarInnerW, sidebarInnerH := ui.InnerSize(&m.theme, sidebarWidth, bodyHeight)
+	mainInnerW, mainInnerH := ui.InnerSize(&m.theme, mainWidth, bodyHeight)
 
 	m.repoList.SetSize(sidebarInnerW, sidebarInnerH)
 	m.prList.SetSize(mainInnerW, mainInnerH)
@@ -329,18 +377,18 @@ func (m *Model) resizeLists() {
 	m.jobList.SetSize(sidebarInnerW, sidebarInnerH)
 
 	if detailWidth > 0 {
-		detailInnerW, detailInnerH := ui.InnerSize(detailWidth, bodyHeight)
+		detailInnerW, detailInnerH := ui.InnerSize(&m.theme, detailWidth, bodyHeight)
 		m.detailView.SetWidth(detailInnerW)
 		m.detailView.SetHeight(detailInnerH)
 	}
 
-	statusInnerW, statusInnerH := ui.InnerSize(m.width, bodyHeight)
+	statusInnerW, statusInnerH := ui.InnerSize(&m.theme, m.width, bodyHeight)
 	m.statusView.SetWidth(statusInnerW)
 	m.statusView.SetHeight(statusInnerH)
 }
 
 func (m Model) bodyHeight() int {
-	header := ui.RenderHeader(m.activeTab, m.width)
+	header := ui.RenderHeader(&m.theme, m.activeTab, m.width)
 	helpBar := m.help.View(m.keys)
 
 	var bottomLines []string
@@ -358,19 +406,45 @@ func (m Model) bodyHeight() int {
 }
 
 func (m Model) panelWidths() (sidebar, main, detail int) {
-	sidebar = 28
-	detail = 30
-	main = m.width - sidebar - detail
-	if m.width < 120 {
+	w := m.width
+
+	switch {
+	case w >= 180:
+		// Very wide: generous sidebar and detail, rest to PR list.
+		sidebar = w * 20 / 100 // ~20%
+		detail = w * 30 / 100  // ~30%
+		main = w - sidebar - detail
+	case w >= 140:
+		// Wide: 3-panel with proportional split.
+		sidebar = w * 22 / 100
+		detail = w * 28 / 100
+		main = w - sidebar - detail
+	case w >= 100:
+		// Medium: 3-panel, tighter.
+		sidebar = 25
+		detail = w * 25 / 100
+		main = w - sidebar - detail
+	case w >= 80:
+		// Narrow: hide detail panel.
+		sidebar = 25
 		detail = 0
-		main = m.width - sidebar
+		main = w - sidebar
+	default:
+		// Very narrow: compact.
+		sidebar = 20
+		detail = 0
+		main = w - sidebar
 	}
-	if m.width < 80 {
-		sidebar = 22
-		main = m.width - sidebar
+
+	// Enforce minimums.
+	if sidebar < 18 {
+		sidebar = 18
 	}
-	if main < 10 {
-		main = 10
+	if detail > 0 && detail < 25 {
+		detail = 25
+	}
+	if main < 20 {
+		main = 20
 	}
 	return
 }
