@@ -24,13 +24,23 @@ func RenderStatusBar(context string, keyHints string, flash *FlashMessage, width
 		left = style.Render(flash.Text)
 	}
 
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	// Account for 1-char padding on each side
+	innerWidth := width - 2
+	if innerWidth < 0 {
+		innerWidth = 0
+	}
+
+	leftWidth := lipgloss.Width(left)
+	rightWidth := lipgloss.Width(right)
+	gap := innerWidth - leftWidth - rightWidth
 	if gap < 0 {
 		gap = 0
 	}
-	spacer := lipgloss.NewStyle().Width(gap).Render("")
 
-	return StatusBar.Width(width).Render(
-		lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right),
-	)
+	bar := left + lipgloss.NewStyle().Width(gap).Render("") + right
+
+	return StatusBar.
+		Width(innerWidth).
+		MaxHeight(1).
+		Render(bar)
 }
