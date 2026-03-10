@@ -64,6 +64,31 @@ func TestEnvVarOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadSecretsFromFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	os.WriteFile(path, []byte(`
+[renovate]
+url = "https://reno.example.com"
+secret = "file-secret"
+
+[github]
+owner = "testorg"
+token = "file-token"
+`), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Renovate.Secret != "file-secret" {
+		t.Errorf("expected secret from file, got %s", cfg.Renovate.Secret)
+	}
+	if cfg.GitHub.Token != "file-token" {
+		t.Errorf("expected token from file, got %s", cfg.GitHub.Token)
+	}
+}
+
 func TestGitHubTokenFallback(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "fallback-token")
 

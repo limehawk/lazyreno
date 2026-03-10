@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -14,12 +16,12 @@ type Config struct {
 
 type RenovateConfig struct {
 	URL    string `toml:"url"`
-	Secret string `toml:"-"` // env only
+	Secret string `toml:"secret"`
 }
 
 type GitHubConfig struct {
 	Owner string `toml:"owner"`
-	Token string `toml:"-"` // env only
+	Token string `toml:"token"`
 }
 
 type UIConfig struct {
@@ -57,5 +59,22 @@ func Load(path string) (*Config, error) {
 		cfg.GitHub.Owner = v
 	}
 
+	// Resolve op:// secret references via 1Password CLI
+	cfg.Renovate.Secret = resolveSecret(cfg.Renovate.Secret)
+	cfg.GitHub.Token = resolveSecret(cfg.GitHub.Token)
+
 	return cfg, nil
+}
+
+// resolveSecret resolves an op:// reference via the 1Password CLI.
+// Returns the original value if it's not an op:// reference or if resolution fails.
+func resolveSecret(val string) string {
+	if !strings.HasPrefix(val, "op://") {
+		return val
+	}
+	out, err := exec.Command("op", "read", val).Output()
+	if err != nil {
+		return val
+	}
+	return strings.TrimSpace(string(out))
 }
