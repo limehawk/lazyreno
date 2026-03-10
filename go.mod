@@ -10,6 +10,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/google/go-github/v82 v82.0.0
+	github.com/google/go-github/v84 v84.0.0
 )
 
 require (
