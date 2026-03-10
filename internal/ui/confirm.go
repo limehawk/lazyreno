@@ -10,17 +10,11 @@ func RenderConfirm(message string, width, height int) string {
 		panelWidth = 30
 	}
 
-	panel := Panel{
-		Title:   "Confirm",
-		Content: content,
-		Focused: true,
-		Width:   panelWidth,
-		Height:  7,
-	}
+	panel := RenderPanel("Confirm", content, true, panelWidth, 7)
 
 	return lipgloss.Place(
 		width, height,
 		lipgloss.Center, lipgloss.Center,
-		panel.View(),
+		panel,
 	)
 }

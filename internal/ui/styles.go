@@ -25,13 +25,29 @@ var (
 	InactiveTab = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("242")).
 			Padding(0, 1)
-
-	// Unused legacy — kept for reference, panel.go builds borders manually now
-	FocusedBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(Accent)
-
-	UnfocusedBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240"))
 )
+
+// PanelBorder returns a lipgloss style with a rounded border.
+// Focused panels get the accent color, unfocused get a dim gray.
+func PanelBorder(focused bool) lipgloss.Style {
+	color := lipgloss.Color("240")
+	if focused {
+		color = Accent
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(color).
+		Padding(0, 1)
+}
+
+// PanelTitle returns a styled title string for a panel header.
+func PanelTitle(title string, focused bool) string {
+	color := lipgloss.Color("240")
+	if focused {
+		color = Accent
+	}
+	return lipgloss.NewStyle().
+		Foreground(color).
+		Bold(focused).
+		Render(title)
+}

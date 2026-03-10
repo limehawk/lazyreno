@@ -1,99 +1,95 @@
 package ui
 
-import (
-	"strings"
+import "strings"
 
-	"charm.land/lipgloss/v2"
-)
-
-// Panel renders content inside a bordered box with a title.
-// Focused panels get the accent border.
-type Panel struct {
-	Title   string
-	Content string
-	Focused bool
-	Width   int
-	Height  int
-}
-
-func (p Panel) View() string {
-	if p.Width < 4 || p.Height < 3 {
+// RenderPanel wraps content in a bordered panel with a title.
+// It uses lipgloss rounded borders instead of hand-drawn box characters.
+func RenderPanel(title, content string, focused bool, width, height int) string {
+	if width < 4 || height < 3 {
 		return ""
 	}
 
-	borderColor := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	if p.Focused {
-		borderColor = lipgloss.NewStyle().Foreground(Accent)
-		titleStyle = lipgloss.NewStyle().Foreground(Accent).Bold(true)
+	style := PanelBorder(focused)
+
+	// The border + padding consume space. We set the inner dimensions
+	// so the outer dimensions match the requested width/height.
+	// Border takes 2 cols (left+right), padding(0,1) takes 2 cols.
+	innerWidth := width - style.GetHorizontalFrameSize()
+	innerHeight := height - style.GetVerticalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	if innerHeight < 1 {
+		innerHeight = 1
 	}
 
-	innerWidth := p.Width - 2
-	innerHeight := p.Height - 2
+	style = style.Width(innerWidth).Height(innerHeight)
 
-	// Build top border: ╭─ Title ────────╮
-	topLeft := borderColor.Render("╭")
-	topRight := borderColor.Render("╮")
-	bottomLeft := borderColor.Render("╰")
-	bottomRight := borderColor.Render("╯")
-	hBar := borderColor.Render("─")
-	vBar := borderColor.Render("│")
-
-	var topLine string
-	if p.Title != "" {
-		titleStr := titleStyle.Render(" " + p.Title + " ")
-		titleVisualWidth := lipgloss.Width(titleStr)
-		remainingBars := innerWidth - titleVisualWidth
-		if remainingBars < 0 {
-			remainingBars = 0
-		}
-		leftBars := 1
-		rightBars := remainingBars - leftBars
-		if rightBars < 0 {
-			rightBars = 0
-		}
-		topLine = topLeft + strings.Repeat(hBar, leftBars) + titleStr + strings.Repeat(hBar, rightBars) + topRight
-	} else {
-		topLine = topLeft + strings.Repeat(hBar, innerWidth) + topRight
+	// Set the title in the top border if provided.
+	if title != "" {
+		titleStr := PanelTitle(" "+title+" ", focused)
+		style = style.BorderTop(true).
+			SetString(titleStr)
 	}
 
-	// Build bottom border: ╰────────────────╯
-	bottomLine := bottomLeft + strings.Repeat(hBar, innerWidth) + bottomRight
-
-	// Pad/truncate content to fit inner dimensions
-	contentLines := strings.Split(p.Content, "\n")
-	for len(contentLines) < innerHeight {
-		contentLines = append(contentLines, "")
-	}
-	if len(contentLines) > innerHeight {
-		contentLines = contentLines[:innerHeight]
-	}
-
-	// Build middle rows with vertical borders
-	var rows []string
-	rows = append(rows, topLine)
-	for _, line := range contentLines {
-		lineWidth := lipgloss.Width(line)
-		padding := innerWidth - lineWidth
-		if padding < 0 {
-			// Truncate if line is too wide — crude but functional
-			line = runeSlice(line, innerWidth-1) + "…"
-			padding = 0
-		}
-		rows = append(rows, vBar+line+strings.Repeat(" ", padding)+vBar)
-	}
-	rows = append(rows, bottomLine)
-
-	return strings.Join(rows, "\n")
+	return style.Render(content)
 }
 
-// runeSlice returns up to n visible characters from a string,
-// being careful about multi-byte runes. Does not handle ANSI well
-// but is a reasonable fallback.
-func runeSlice(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
+// RenderPanelAround wraps already-rendered content (e.g. from list.View())
+// in a bordered panel. The content is placed as-is; only padding lines are
+// added to fill the panel height.
+func RenderPanelAround(title, content string, focused bool, width, height int) string {
+	if width < 4 || height < 3 {
+		return ""
 	}
-	return string(runes[:n])
+
+	style := PanelBorder(focused)
+
+	innerWidth := width - style.GetHorizontalFrameSize()
+	innerHeight := height - style.GetVerticalFrameSize()
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+
+	// Pad content to fill height.
+	lines := strings.Split(content, "\n")
+	for len(lines) < innerHeight {
+		lines = append(lines, "")
+	}
+	if len(lines) > innerHeight {
+		lines = lines[:innerHeight]
+	}
+	padded := strings.Join(lines, "\n")
+
+	style = style.Width(innerWidth).Height(innerHeight)
+
+	if title != "" {
+		titleStr := PanelTitle(" "+title+" ", focused)
+		style = style.SetString(titleStr)
+	}
+
+	return style.Render(padded)
+}
+
+// WrapListInPanel wraps a list.View() output in a bordered panel.
+// The list should already be sized to fit the inner dimensions.
+func WrapListInPanel(title, listView string, focused bool, width, height int) string {
+	return RenderPanelAround(title, listView, focused, width, height)
+}
+
+// InnerSize returns the inner width and height for a panel of the given outer dimensions.
+func InnerSize(width, height int) (int, int) {
+	style := PanelBorder(false)
+	iw := width - style.GetHorizontalFrameSize()
+	ih := height - style.GetVerticalFrameSize()
+	if iw < 1 {
+		iw = 1
+	}
+	if ih < 1 {
+		ih = 1
+	}
+	return iw, ih
 }

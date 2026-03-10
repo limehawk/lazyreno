@@ -15,6 +15,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.SetWidth(msg.Width)
+		m.resizeLists()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -39,36 +40,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab1):
 			m.activeTab = TabPRs
-			m.sidebarCursor = 0
-			m.mainCursor = 0
+			m.focusedPanel = 0
+			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab2):
 			m.activeTab = TabRepos
-			m.sidebarCursor = 0
-			m.mainCursor = 0
+			m.focusedPanel = 0
+			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab3):
 			m.activeTab = TabJobs
-			m.sidebarCursor = 0
-			m.mainCursor = 0
+			m.focusedPanel = 0
+			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab4):
 			m.activeTab = TabStatus
+			m.focusedPanel = 0
+			return m, nil
 		case key.Matches(msg, GlobalKeys.NextTab):
 			m.activeTab = (m.activeTab + 1) % 4
-			m.sidebarCursor = 0
-			m.mainCursor = 0
+			m.focusedPanel = 0
+			return m, nil
 		case key.Matches(msg, GlobalKeys.PrevTab):
 			m.activeTab = (m.activeTab + 3) % 4
-			m.sidebarCursor = 0
-			m.mainCursor = 0
+			m.focusedPanel = 0
+			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusNext):
-			m.focusedPanel = (m.focusedPanel + 1) % 3
+			maxPanel := 2
+			if m.activeTab != TabPRs {
+				maxPanel = 1
+			}
+			if m.activeTab == TabStatus {
+				maxPanel = 0
+			}
+			m.focusedPanel = (m.focusedPanel + 1) % (maxPanel + 1)
+			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusPrev):
-			m.focusedPanel = (m.focusedPanel + 2) % 3
+			maxPanel := 2
+			if m.activeTab != TabPRs {
+				maxPanel = 1
+			}
+			if m.activeTab == TabStatus {
+				maxPanel = 0
+			}
+			m.focusedPanel = (m.focusedPanel + maxPanel) % (maxPanel + 1)
+			return m, nil
 		case key.Matches(msg, GlobalKeys.Refresh):
 			m.prs = nil
 			return m, tea.Batch(m.fetchRepos(), m.fetchStatus(), m.fetchJobQueue())
 		}
 
-		// Delegate to tab-specific handling
+		// Delegate to tab-specific + focused-panel handling
 		return m.updateActiveTab(msg)
 
 	// Data messages
@@ -77,26 +96,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.repos = msg.Repos
-			m.prs = nil // clear before refetch
-			return m, m.fetchAllPRs()
+			m.prs = nil
+			cmd1 := m.rebuildAllRepoList()
+			return m, tea.Batch(cmd1, m.fetchAllPRs())
 		}
 	case PRsFetchedMsg:
 		if msg.Err != nil {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.prs = append(m.prs, msg.PRs...)
+			cmd1 := m.rebuildRepoList()
+			cmd2 := m.rebuildPRList()
+			m.updateDetailView()
+			return m, tea.Batch(cmd1, cmd2)
 		}
 	case JobQueueFetchedMsg:
 		if msg.Err != nil {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.jobs = msg.Jobs
+			cmd := m.rebuildJobList()
+			return m, cmd
 		}
 	case SystemStatusFetchedMsg:
 		if msg.Err != nil {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.status = msg.Status
+			m.updateStatusView()
 		}
 	case MergePRResultMsg:
 		if msg.Err != nil {
@@ -104,6 +131,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Merged #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
+			cmd1 := m.rebuildRepoList()
+			cmd2 := m.rebuildPRList()
+			m.updateDetailView()
+			return m, tea.Batch(cmd1, cmd2)
 		}
 	case ClosePRResultMsg:
 		if msg.Err != nil {
@@ -111,6 +142,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Closed #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
+			cmd1 := m.rebuildRepoList()
+			cmd2 := m.rebuildPRList()
+			m.updateDetailView()
+			return m, tea.Batch(cmd1, cmd2)
 		}
 	case SyncTriggeredMsg:
 		if msg.Err != nil {
@@ -138,77 +173,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Navigation
-	switch {
-	case key.Matches(msg, GlobalKeys.Up):
-		if m.focusedPanel == 0 && m.sidebarCursor > 0 {
-			m.sidebarCursor--
-			m.mainCursor = 0
-		} else if m.focusedPanel == 1 && m.mainCursor > 0 {
-			m.mainCursor--
-		}
-	case key.Matches(msg, GlobalKeys.Down):
-		if m.focusedPanel == 0 {
-			m.sidebarCursor++
-		} else if m.focusedPanel == 1 {
-			m.mainCursor++
-		}
-	case key.Matches(msg, GlobalKeys.Top):
-		if m.focusedPanel == 0 {
-			m.sidebarCursor = 0
-			m.mainCursor = 0
-		} else if m.focusedPanel == 1 {
-			m.mainCursor = 0
-		}
-	case key.Matches(msg, GlobalKeys.Bottom):
-		if m.focusedPanel == 0 {
-			m.sidebarCursor = m.getSidebarLen() - 1
-			m.mainCursor = 0
-		} else if m.focusedPanel == 1 {
-			m.mainCursor = m.getMainLen() - 1
-		}
-	}
+	var cmd tea.Cmd
 
-	// Clamp cursors
-	maxSidebar := m.getSidebarLen() - 1
-	if maxSidebar < 0 {
-		maxSidebar = 0
-	}
-	if m.sidebarCursor > maxSidebar {
-		m.sidebarCursor = maxSidebar
-	}
-	if m.sidebarCursor < 0 {
-		m.sidebarCursor = 0
-	}
-	maxMain := m.getMainLen() - 1
-	if maxMain < 0 {
-		maxMain = 0
-	}
-	if m.mainCursor > maxMain {
-		m.mainCursor = maxMain
-	}
-	if m.mainCursor < 0 {
-		m.mainCursor = 0
-	}
-
-	// Tab-specific actions
 	switch m.activeTab {
 	case TabPRs:
-		return m.updatePRsTab(msg)
+		// Forward keys to the focused list.
+		if m.focusedPanel == 0 {
+			prevIdx := m.repoList.Index()
+			m.repoList, cmd = m.repoList.Update(msg)
+			if m.repoList.Index() != prevIdx {
+				// Sidebar selection changed — rebuild PR list.
+				cmd2 := m.rebuildPRList()
+				m.updateDetailView()
+				return m, tea.Batch(cmd, cmd2)
+			}
+			return m, cmd
+		} else if m.focusedPanel == 1 {
+			prevIdx := m.prList.Index()
+			m.prList, cmd = m.prList.Update(msg)
+			if m.prList.Index() != prevIdx {
+				m.updateDetailView()
+			}
+			// Check for PR-specific actions.
+			return m.handlePRActions(msg)
+		} else {
+			// Detail pane: forward to viewport for scrolling.
+			m.detailView, cmd = m.detailView.Update(msg)
+			return m, cmd
+		}
+
+	case TabRepos:
+		if m.focusedPanel == 0 {
+			m.allRepoList, cmd = m.allRepoList.Update(msg)
+			return m, cmd
+		}
+		// Main panel in Repos tab is just informational, no list.
+		return m, nil
+
 	case TabJobs:
-		return m.updateJobsTab(msg)
+		if m.focusedPanel == 0 {
+			m.jobList, cmd = m.jobList.Update(msg)
+			// Check for job-specific actions.
+			return m.handleJobActions(msg)
+		}
+		// Main panel in Jobs tab is informational.
+		return m, nil
+
 	case TabStatus:
-		return m.updateStatusTab(msg)
+		// Status tab: forward to viewport for scrolling.
+		m.statusView, cmd = m.statusView.Update(msg)
+		// Check for status-specific actions.
+		return m.handleStatusActions(msg)
 	}
 
 	return m, nil
 }
 
-func (m *Model) updatePRsTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.focusedPanel != 1 {
-		return m, nil
-	}
-
+func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	selectedPR := m.getSelectedPR()
 	if selectedPR == nil {
 		return m, nil
@@ -267,22 +288,25 @@ func (m *Model) updatePRsTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) updateJobsTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleJobActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.renovate == nil {
 		return m, nil
 	}
 
 	switch {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
-		if m.focusedPanel == 0 && m.sidebarCursor < len(m.jobs) {
-			job := m.jobs[m.sidebarCursor]
-			return m, func() tea.Msg {
-				err := m.renovate.AddJob(job.Repo)
-				if err != nil {
-					return SyncTriggeredMsg{Err: err}
-				}
-				return SyncTriggeredMsg{Err: nil}
-			}
+		sel := m.jobList.SelectedItem()
+		if sel == nil {
+			return m, nil
+		}
+		ji, ok := sel.(JobItem)
+		if !ok {
+			return m, nil
+		}
+		job := ji.Job
+		return m, func() tea.Msg {
+			err := m.renovate.AddJob(job.Repo)
+			return SyncTriggeredMsg{Err: err}
 		}
 	case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
 		m.confirmMsg = "Purge all failed jobs?"
@@ -298,7 +322,7 @@ func (m *Model) updateJobsTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) updateStatusTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleStatusActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.renovate == nil {
 		return m, nil
 	}
