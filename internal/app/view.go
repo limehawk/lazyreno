@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/ui"
 )
@@ -23,11 +23,6 @@ func (m Model) View() tea.View {
 		return view("Loading...")
 	}
 
-	// Help overlay
-	if m.showHelp {
-		return view(ui.RenderHelp(m.helpEntries(), m.width, m.height))
-	}
-
 	// Confirmation dialog
 	if m.confirmMsg != "" {
 		return view(ui.RenderConfirm(m.confirmMsg, m.width, m.height))
@@ -35,13 +30,29 @@ func (m Model) View() tea.View {
 
 	header := ui.RenderHeader(m.activeTab, m.width)
 
-	// Status bar
-	context := fmt.Sprintf("%d repos  %d PRs", len(m.repos), len(m.prs))
-	keyHints := "? help  q quit  R refresh"
-	statusBar := ui.RenderStatusBar(context, keyHints, m.flash, m.width)
+	// Flash message line (shown above help bar when active)
+	var flashLine string
+	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
+		style := ui.SuccessText
+		if m.flashIsError {
+			style = ui.ErrorText
+		}
+		flashLine = style.Render(m.flashText)
+	}
 
-	// Body height = total - header - status bar
-	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(statusBar)
+	// Help bar via the help bubble
+	helpBar := m.help.View(m.keys)
+
+	// Build the bottom section: optional flash + help bar
+	var bottomLines []string
+	if flashLine != "" {
+		bottomLines = append(bottomLines, flashLine)
+	}
+	bottomLines = append(bottomLines, helpBar)
+	bottom := lipgloss.JoinVertical(lipgloss.Left, bottomLines...)
+
+	// Body height = total - header - bottom
+	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(bottom)
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
@@ -58,7 +69,7 @@ func (m Model) View() tea.View {
 		body = m.viewStatus(bodyHeight)
 	}
 
-	return view(lipgloss.JoinVertical(lipgloss.Left, header, body, statusBar))
+	return view(lipgloss.JoinVertical(lipgloss.Left, header, body, bottom))
 }
 
 func (m Model) viewPRs(height int) string {
@@ -387,26 +398,6 @@ func (m Model) viewStatus(height int) string {
 	}.View()
 }
 
-func (m Model) helpEntries() []ui.HelpEntry {
-	return []ui.HelpEntry{
-		{"1-4", "Switch tabs"},
-		{"[ ]", "Prev/next tab"},
-		{"Tab", "Cycle panel focus"},
-		{"j/k", "Move up/down"},
-		{"h/l", "Move left/right"},
-		{"/", "Filter"},
-		{"R", "Refresh"},
-		{"m", "Merge PR"},
-		{"M", "Merge safe PRs"},
-		{"c", "Close PR"},
-		{"o", "Open in browser"},
-		{"s", "Trigger sync"},
-		{"r", "Retry job"},
-		{"p", "Purge failed"},
-		{"?", "Toggle help"},
-		{"q", "Quit"},
-	}
-}
 
 func truncate(s string, maxLen int) string {
 	if utf8.RuneCountInString(s) <= maxLen {

@@ -25,6 +25,31 @@ type KeyMap struct {
 	Escape    key.Binding
 	HalfDown  key.Binding
 	HalfUp    key.Binding
+
+	// Tab-specific bindings (shown in full help only)
+	Merge     key.Binding
+	MergeSafe key.Binding
+	Close     key.Binding
+	Open      key.Binding
+	Sync      key.Binding
+	Retry     key.Binding
+	Purge     key.Binding
+}
+
+// ShortHelp returns bindings for the compact one-line help bar.
+func (k KeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Help, k.Quit, k.Refresh, k.Up, k.Down, k.FocusNext, k.NextTab}
+}
+
+// FullHelp returns the extended help grouped by columns.
+func (k KeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown},
+		{k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.NextTab, k.PrevTab},
+		{k.FocusNext, k.FocusPrev, k.Enter, k.Filter, k.Escape},
+		{k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Retry, k.Purge},
+		{k.Refresh, k.Help, k.Quit},
+	}
 }
 
 var GlobalKeys = KeyMap{
@@ -50,4 +75,12 @@ var GlobalKeys = KeyMap{
 	Escape:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	HalfDown:  key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("C-d", "half page down")),
 	HalfUp:    key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("C-u", "half page up")),
+
+	Merge:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge PR")),
+	MergeSafe: key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "merge safe PRs")),
+	Close:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "close PR")),
+	Open:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
+	Sync:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync now")),
+	Retry:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry job")),
+	Purge:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "purge failed")),
 }

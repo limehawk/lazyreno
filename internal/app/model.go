@@ -4,7 +4,9 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/config"
 	"github.com/limehawk/lazyreno/internal/ui"
@@ -34,10 +36,13 @@ type Model struct {
 	status *backend.SystemStatus
 
 	// UI state
-	showHelp     bool
+	keys         KeyMap
+	help         help.Model
 	confirmMsg   string
 	confirmFn    func() tea.Cmd
-	flash        *ui.FlashMessage
+	flashText    string
+	flashIsError bool
+	flashExpiry  time.Time
 	focusedPanel int // 0=sidebar, 1=main, 2=detail
 
 	// Per-tab cursors
@@ -58,11 +63,19 @@ func NewModel(cfg *config.Config) Model {
 		gh = backend.NewGitHubClient(cfg.GitHub.Token)
 	}
 
+	h := help.New()
+	s := help.DefaultDarkStyles()
+	s.ShortKey = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true)
+	s.FullKey = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true)
+	h.Styles = s
+
 	return Model{
 		cfg:      cfg,
 		renovate: renovate,
 		github:   gh,
 		cache:    backend.NewCache(30 * time.Second),
+		keys:     GlobalKeys,
+		help:     h,
 	}
 }
 

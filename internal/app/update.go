@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"github.com/limehawk/lazyreno/internal/ui"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -15,6 +14,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.SetWidth(msg.Width)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -31,19 +31,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Help overlay intercepts escape
-		if m.showHelp {
-			if key.Matches(msg, GlobalKeys.Help, GlobalKeys.Escape) {
-				m.showHelp = false
-			}
-			return m, nil
-		}
-
 		switch {
 		case key.Matches(msg, GlobalKeys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, GlobalKeys.Help):
-			m.showHelp = true
+			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab1):
 			m.activeTab = TabPRs
@@ -332,11 +324,9 @@ func (m *Model) updateStatusTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) setFlash(text string, isError bool) {
-	m.flash = &ui.FlashMessage{
-		Text:      text,
-		IsError:   isError,
-		ExpiresAt: time.Now().Add(5 * time.Second),
-	}
+	m.flashText = text
+	m.flashIsError = isError
+	m.flashExpiry = time.Now().Add(5 * time.Second)
 }
 
 // Async commands
