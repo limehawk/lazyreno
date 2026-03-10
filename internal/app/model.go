@@ -35,10 +35,12 @@ type Model struct {
 	height    int
 
 	// Shared data
-	repos  []string
-	prs    []backend.PR
-	jobs   []backend.Job
-	status *backend.SystemStatus
+	repos          []string
+	prs            []backend.PR
+	pendingPRs     []backend.PR
+	pendingPRCount int // number of PR fetch responses expected
+	jobs           []backend.Job
+	status         *backend.SystemStatus
 
 	// Filtered PRs for the currently selected repo (maps to prTable rows).
 	filteredPRs []backend.PR
@@ -245,6 +247,7 @@ func removePR(prs []backend.PR, repo string, number int) []backend.PR {
 }
 
 func (m *Model) rebuildRepoList() tea.Cmd {
+	prevIdx := m.repoList.Index()
 	prsByRepo := m.groupPRsByRepo()
 	repoOrder := m.getReposWithPRs(prsByRepo)
 
@@ -254,7 +257,11 @@ func (m *Model) rebuildRepoList() tea.Cmd {
 		items[i] = RepoItem{Name: repo, PRCount: len(prsByRepo[fullName])}
 	}
 	m.repoList.Title = fmt.Sprintf("Repos (%d open)", len(items))
-	return m.repoList.SetItems(items)
+	cmd := m.repoList.SetItems(items)
+	if prevIdx < len(items) {
+		m.repoList.Select(prevIdx)
+	}
+	return cmd
 }
 
 func (m *Model) rebuildPRTable() {
@@ -272,6 +279,7 @@ func (m *Model) rebuildPRTable() {
 	}
 	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
 
+	prevCursor := m.prTable.Cursor()
 	m.filteredPRs = nil
 	for _, pr := range m.prs {
 		if pr.Repo == fullName {
@@ -284,6 +292,9 @@ func (m *Model) rebuildPRTable() {
 		rows[i] = prToRow(pr)
 	}
 	m.prTable.SetRows(rows)
+	if prevCursor < len(rows) {
+		m.prTable.SetCursor(prevCursor)
+	}
 }
 
 func prToRow(pr backend.PR) table.Row {
@@ -305,21 +316,31 @@ func prToRow(pr backend.PR) table.Row {
 }
 
 func (m *Model) rebuildAllRepoList() tea.Cmd {
+	prevIdx := m.allRepoList.Index()
 	items := make([]list.Item, len(m.repos))
 	for i, repo := range m.repos {
 		items[i] = AllRepoItem{Name: repo}
 	}
 	m.allRepoList.Title = fmt.Sprintf("Repos (%d)", len(items))
-	return m.allRepoList.SetItems(items)
+	cmd := m.allRepoList.SetItems(items)
+	if prevIdx < len(items) {
+		m.allRepoList.Select(prevIdx)
+	}
+	return cmd
 }
 
 func (m *Model) rebuildJobList() tea.Cmd {
+	prevIdx := m.jobList.Index()
 	items := make([]list.Item, len(m.jobs))
 	for i, job := range m.jobs {
 		items[i] = JobItem{Job: job}
 	}
 	m.jobList.Title = fmt.Sprintf("Queue (%d)", len(items))
-	return m.jobList.SetItems(items)
+	cmd := m.jobList.SetItems(items)
+	if prevIdx < len(items) {
+		m.jobList.Select(prevIdx)
+	}
+	return cmd
 }
 
 func (m *Model) updateDetailView() {

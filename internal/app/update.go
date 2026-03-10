@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
+	"github.com/limehawk/lazyreno/internal/ui"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -89,7 +90,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPanel = 0
 			m.syncTableFocus()
 			return m, nil
-		case key.Matches(msg, GlobalKeys.FocusNext):
+		case key.Matches(msg, GlobalKeys.FocusNext), key.Matches(msg, GlobalKeys.Right):
 			maxPanel := 2
 			if m.activeTab != TabPRs {
 				maxPanel = 1
@@ -100,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPanel = (m.focusedPanel + 1) % (maxPanel + 1)
 			m.syncTableFocus()
 			return m, nil
-		case key.Matches(msg, GlobalKeys.FocusPrev):
+		case key.Matches(msg, GlobalKeys.FocusPrev), key.Matches(msg, GlobalKeys.Left):
 			maxPanel := 2
 			if m.activeTab != TabPRs {
 				maxPanel = 1
@@ -124,19 +125,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.repos = msg.Repos
-			m.prs = nil
+			m.pendingPRs = nil
+			m.pendingPRCount = len(msg.Repos)
 			cmd1 := m.rebuildAllRepoList()
 			return m, tea.Batch(cmd1, m.fetchAllPRs())
 		}
 	case PRsFetchedMsg:
 		if msg.Err != nil {
 			m.setFlash(msg.Err.Error(), true)
+			m.pendingPRCount--
 		} else {
-			m.prs = append(m.prs, msg.PRs...)
-			cmd1 := m.rebuildRepoList()
-			m.rebuildPRTable()
-			m.updateDetailView()
-			return m, cmd1
+			m.pendingPRs = append(m.pendingPRs, msg.PRs...)
+			m.pendingPRCount--
+			if m.pendingPRCount <= 0 {
+				m.prs = m.pendingPRs
+				m.pendingPRs = nil
+				cmd1 := m.rebuildRepoList()
+				m.rebuildPRTable()
+				m.updateDetailView()
+				return m, cmd1
+			}
 		}
 	case JobQueueFetchedMsg:
 		if msg.Err != nil {
@@ -267,7 +275,7 @@ func (m *Model) showConfirm(message string, fn func() tea.Cmd) tea.Cmd {
 				Negative("No").
 				Value(&m.confirmed),
 		),
-	).WithWidth(40)
+	).WithWidth(40).WithTheme(huh.ThemeFunc(ui.HuhTheme))
 	return m.confirmForm.Init()
 }
 
@@ -278,7 +286,7 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
+	case key.Matches(msg, key.NewBinding(key.WithKeys("m", "enter"))):
 		pr := *selectedPR
 		cmd := m.showConfirm(fmt.Sprintf("Merge #%d into %s?", pr.Number, pr.Base), func() tea.Cmd {
 			return func() tea.Msg {
