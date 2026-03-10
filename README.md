@@ -12,6 +12,14 @@ A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend
 
 ## Install
 
+### AUR (Arch Linux)
+
+```bash
+yay -S lazyreno
+```
+
+### Go
+
 ```bash
 go install github.com/limehawk/lazyreno/cmd/lazyreno@latest
 ```
