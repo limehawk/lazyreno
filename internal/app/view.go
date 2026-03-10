@@ -20,27 +20,23 @@ func (m Model) View() tea.View {
 		return view("Loading...")
 	}
 
-	// Confirmation form
 	if m.confirmForm != nil {
 		return view(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.confirmForm.View()))
 	}
 
-	header := ui.RenderHeader(&m.theme, m.activeTab, m.width)
+	header := ui.RenderHeader(m.activeTab, m.width)
 
-	// Flash message line (shown above help bar when active)
 	var flashLine string
 	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
-		style := m.theme.SuccessText
+		style := ui.SuccessText
 		if m.flashIsError {
-			style = m.theme.ErrorText
+			style = ui.ErrorText
 		}
 		flashLine = style.Render(m.flashText)
 	}
 
-	// Help bar via the help bubble
 	helpBar := m.help.View(m.keys)
 
-	// Build the bottom section: optional flash + help bar
 	var bottomLines []string
 	if flashLine != "" {
 		bottomLines = append(bottomLines, flashLine)
@@ -48,7 +44,6 @@ func (m Model) View() tea.View {
 	bottomLines = append(bottomLines, helpBar)
 	bottom := lipgloss.JoinVertical(lipgloss.Left, bottomLines...)
 
-	// Body height = total - header - bottom
 	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(bottom)
 	if bodyHeight < 1 {
 		bodyHeight = 1
@@ -72,15 +67,13 @@ func (m Model) View() tea.View {
 func (m Model) viewPRs(height int) string {
 	sidebarWidth, mainWidth, detailWidth := m.panelWidths()
 
-	// Sidebar: repo list wrapped in a panel (list has its own title).
 	sidebar := ui.WrapListInPanel(
-		&m.theme, "", m.repoList.View(),
+		m.repoList.View(),
 		m.focusedPanel == 0, sidebarWidth, height,
 	)
 
-	// Main: PR list wrapped in a panel.
-	main := ui.WrapListInPanel(
-		&m.theme, "", m.prList.View(),
+	main := ui.RenderPanel(
+		"", m.prTable.View(),
 		m.focusedPanel == 1, mainWidth, height,
 	)
 
@@ -88,7 +81,7 @@ func (m Model) viewPRs(height int) string {
 
 	if detailWidth > 0 {
 		detail := ui.RenderPanel(
-			&m.theme, "Details", m.detailView.View(),
+			"Details", m.detailView.View(),
 			m.focusedPanel == 2, detailWidth, height,
 		)
 		panels = lipgloss.JoinHorizontal(lipgloss.Top, panels, detail)
@@ -108,12 +101,11 @@ func (m Model) viewRepos(height int) string {
 	mainWidth := m.width - sidebarWidth
 
 	sidebar := ui.WrapListInPanel(
-		&m.theme, "", m.allRepoList.View(),
+		m.allRepoList.View(),
 		m.focusedPanel == 0, sidebarWidth, height,
 	)
 
-	// Main: repo info
-	mainContent := m.theme.Dim.Render("Select a repo")
+	mainContent := ui.Dim.Render("Select a repo")
 	sel := m.allRepoList.SelectedItem()
 	if sel != nil {
 		if ri, ok := sel.(AllRepoItem); ok {
@@ -126,23 +118,22 @@ func (m Model) viewRepos(height int) string {
 				}
 			}
 
-			prCountStr := m.theme.SuccessText.Render(fmt.Sprintf("%d", prCount))
+			prCountStr := ui.SuccessText.Render(fmt.Sprintf("%d", prCount))
 			if prCount > 0 {
-				prCountStr = m.theme.WarningText.Render(fmt.Sprintf("%d", prCount))
+				prCountStr = ui.WarningText.Render(fmt.Sprintf("%d", prCount))
 			}
 
 			mainContent = fmt.Sprintf(
 				"%s  %s\n%s  %s",
-				m.theme.Dim.Render("Repository:"),
-				m.theme.Bold.Render(fullName),
-				m.theme.Dim.Render("Open PRs:  "),
+				ui.Dim.Render("Repository:"),
+				ui.Bold.Render(fullName),
+				ui.Dim.Render("Open PRs:  "),
 				prCountStr,
 			)
 		}
 	}
 
 	main := ui.RenderPanel(
-		&m.theme,
 		"Repository Info",
 		mainContent,
 		m.focusedPanel == 1,
@@ -164,27 +155,26 @@ func (m Model) viewJobs(height int) string {
 	mainWidth := m.width - sidebarWidth
 
 	sidebar := ui.WrapListInPanel(
-		&m.theme, "", m.jobList.View(),
+		m.jobList.View(),
 		m.focusedPanel == 0, sidebarWidth, height,
 	)
 
-	mainContent := m.theme.Dim.Render("Select a job")
+	mainContent := ui.Dim.Render("Select a job")
 	sel := m.jobList.SelectedItem()
 	if sel != nil {
 		if ji, ok := sel.(JobItem); ok {
 			job := ji.Job
 			mainContent = fmt.Sprintf(
 				"%s  %s\n%s  %s\n%s  %s\n\n%s  %s",
-				m.theme.Dim.Render("Job:   "), job.ID,
-				m.theme.Dim.Render("Repo:  "), m.theme.Bold.Render(job.Repo),
-				m.theme.Dim.Render("Status:"), job.Status,
-				m.theme.AccentText.Render("[r]"), "retry  "+m.theme.AccentText.Render("[p]")+" purge failed",
+				ui.Dim.Render("Job:   "), job.ID,
+				ui.Dim.Render("Repo:  "), ui.Bold.Render(job.Repo),
+				ui.Dim.Render("Status:"), job.Status,
+				ui.ShortcutKey.Render("[r]"), "retry  "+ui.ShortcutKey.Render("[p]")+" purge failed",
 			)
 		}
 	}
 
 	main := ui.RenderPanel(
-		&m.theme,
 		"Job Details",
 		mainContent,
 		m.focusedPanel == 1,
@@ -197,7 +187,7 @@ func (m Model) viewJobs(height int) string {
 
 func (m Model) viewStatus(height int) string {
 	return ui.RenderPanel(
-		&m.theme, "System Status", m.statusView.View(),
+		"System Status", m.statusView.View(),
 		true, m.width, height,
 	)
 }

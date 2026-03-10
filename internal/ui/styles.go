@@ -1,92 +1,68 @@
 package ui
 
-import (
-	"image/color"
+import "charm.land/lipgloss/v2"
 
-	"charm.land/lipgloss/v2"
+// ANSI colors — inherits from terminal theme automatically.
+var (
+	Red     = lipgloss.Color("1")
+	Green   = lipgloss.Color("2")
+	Yellow  = lipgloss.Color("3")
+	Blue    = lipgloss.Color("4")
+	Magenta = lipgloss.Color("5")
+	Cyan    = lipgloss.Color("6")
+	White   = lipgloss.Color("7")
+	Gray    = lipgloss.Color("8")
+
+	BrightRed   = lipgloss.Color("9")
+	BrightGreen = lipgloss.Color("10")
+	BrightBlue  = lipgloss.Color("12")
+	BrightCyan  = lipgloss.Color("14")
+	BrightWhite = lipgloss.Color("15")
 )
 
-// Theme holds all colors and pre-built styles, adapted for light or dark
-// terminal backgrounds.
-type Theme struct {
-	// Raw colors
-	Accent         color.Color
-	DimColor       color.Color
-	ErrorColor     color.Color
-	WarningColor   color.Color
-	SuccessColor   color.Color
-	UnfocusedBorder color.Color
+// Pre-built styles.
+var (
+	Bold        = lipgloss.NewStyle().Bold(true)
+	Dim         = lipgloss.NewStyle().Foreground(Gray)
+	AccentText  = lipgloss.NewStyle().Foreground(Blue).Bold(true)
+	ErrorText   = lipgloss.NewStyle().Foreground(Red)
+	WarningText = lipgloss.NewStyle().Foreground(Yellow)
+	SuccessText = lipgloss.NewStyle().Foreground(Green)
 
-	// Pre-built styles
-	Bold        lipgloss.Style
-	Dim         lipgloss.Style
-	AccentText  lipgloss.Style
-	ErrorText   lipgloss.Style
-	WarningText lipgloss.Style
-	SuccessText lipgloss.Style
-	ActiveTab   lipgloss.Style
-	InactiveTab lipgloss.Style
-}
-
-// NewTheme builds a Theme using lipgloss.LightDark to pick colors appropriate
-// for the terminal background.
-func NewTheme(hasDarkBG bool) Theme {
-	ld := lipgloss.LightDark(hasDarkBG)
-
-	accent := ld(lipgloss.Color("#0097b2"), lipgloss.Color("#00d7ff"))
-	dim := ld(lipgloss.Color("#888888"), lipgloss.Color("#6c6c6c"))
-	errColor := ld(lipgloss.Color("#cc3333"), lipgloss.Color("#ff5f5f"))
-	warnColor := ld(lipgloss.Color("#cc8800"), lipgloss.Color("#ffaf00"))
-	successColor := ld(lipgloss.Color("#22aa44"), lipgloss.Color("#5fff87"))
-	unfocused := ld(lipgloss.Color("#aaaaaa"), lipgloss.Color("#585858"))
-
-	return Theme{
-		Accent:          accent,
-		DimColor:        dim,
-		ErrorColor:      errColor,
-		WarningColor:    warnColor,
-		SuccessColor:    successColor,
-		UnfocusedBorder: unfocused,
-
-		Bold:       lipgloss.NewStyle().Bold(true),
-		Dim:        lipgloss.NewStyle().Foreground(dim),
-		AccentText: lipgloss.NewStyle().Foreground(accent).Bold(true),
-		ErrorText:  lipgloss.NewStyle().Foreground(errColor),
-		WarningText: lipgloss.NewStyle().Foreground(warnColor),
-		SuccessText: lipgloss.NewStyle().Foreground(successColor),
-
-		ActiveTab: lipgloss.NewStyle().
+	ActiveTab = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(accent).
-			Padding(0, 1),
+			Foreground(Blue).
+			Padding(0, 1)
 
-		InactiveTab: lipgloss.NewStyle().
-			Foreground(dim).
-			Padding(0, 1),
+	InactiveTab = lipgloss.NewStyle().
+			Foreground(Gray).
+			Padding(0, 1)
+
+	ActiveBorder = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Blue).
+			Padding(0, 1)
+
+	InactiveBorder = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(Gray).
+			Padding(0, 1)
+
+	ShortcutKey = lipgloss.NewStyle().Foreground(Cyan).Bold(true)
+)
+
+// PanelBorder returns the border style for a panel.
+func PanelBorder(focused bool) lipgloss.Style {
+	if focused {
+		return ActiveBorder
 	}
+	return InactiveBorder
 }
 
-// PanelBorder returns a lipgloss style with a rounded border.
-// Focused panels get the accent color, unfocused get a dim gray.
-func (t *Theme) PanelBorder(focused bool) lipgloss.Style {
-	c := t.UnfocusedBorder
+// PanelTitle returns a styled title string.
+func PanelTitle(title string, focused bool) string {
 	if focused {
-		c = t.Accent
+		return AccentText.Render(title)
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(c).
-		Padding(0, 1)
-}
-
-// PanelTitle returns a styled title string for a panel header.
-func (t *Theme) PanelTitle(title string, focused bool) string {
-	c := t.UnfocusedBorder
-	if focused {
-		c = t.Accent
-	}
-	return lipgloss.NewStyle().
-		Foreground(c).
-		Bold(focused).
-		Render(title)
+	return Dim.Render(title)
 }

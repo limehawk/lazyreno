@@ -12,16 +12,12 @@ import (
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.BackgroundColorMsg:
-		m.hasDarkBG = msg.IsDark()
-		m.rebuildTheme()
-		return m, nil
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.SetWidth(msg.Width)
 		m.resizeLists()
+		m.syncTableFocus()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -66,26 +62,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, GlobalKeys.Tab1):
 			m.activeTab = TabPRs
 			m.focusedPanel = 0
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab2):
 			m.activeTab = TabRepos
 			m.focusedPanel = 0
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab3):
 			m.activeTab = TabJobs
 			m.focusedPanel = 0
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab4):
 			m.activeTab = TabStatus
 			m.focusedPanel = 0
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.NextTab):
 			m.activeTab = (m.activeTab + 1) % 4
 			m.focusedPanel = 0
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.PrevTab):
 			m.activeTab = (m.activeTab + 3) % 4
 			m.focusedPanel = 0
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusNext):
 			maxPanel := 2
@@ -96,6 +98,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				maxPanel = 0
 			}
 			m.focusedPanel = (m.focusedPanel + 1) % (maxPanel + 1)
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusPrev):
 			maxPanel := 2
@@ -106,6 +109,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				maxPanel = 0
 			}
 			m.focusedPanel = (m.focusedPanel + maxPanel) % (maxPanel + 1)
+			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Refresh):
 			return m, tea.Batch(m.fetchRepos(), m.fetchStatus(), m.fetchJobQueue())
@@ -130,9 +134,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.prs = append(m.prs, msg.PRs...)
 			cmd1 := m.rebuildRepoList()
-			cmd2 := m.rebuildPRList()
+			m.rebuildPRTable()
 			m.updateDetailView()
-			return m, tea.Batch(cmd1, cmd2)
+			return m, cmd1
 		}
 	case JobQueueFetchedMsg:
 		if msg.Err != nil {
@@ -156,9 +160,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(fmt.Sprintf("Merged #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
 			cmd1 := m.rebuildRepoList()
-			cmd2 := m.rebuildPRList()
+			m.rebuildPRTable()
 			m.updateDetailView()
-			return m, tea.Batch(cmd1, cmd2)
+			return m, cmd1
 		}
 	case ClosePRResultMsg:
 		if msg.Err != nil {
@@ -167,9 +171,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(fmt.Sprintf("Closed #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
 			cmd1 := m.rebuildRepoList()
-			cmd2 := m.rebuildPRList()
+			m.rebuildPRTable()
 			m.updateDetailView()
-			return m, tea.Batch(cmd1, cmd2)
+			return m, cmd1
 		}
 	case SyncTriggeredMsg:
 		if msg.Err != nil {
@@ -201,21 +205,20 @@ func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.activeTab {
 	case TabPRs:
-		// Forward keys to the focused list.
+		// Forward keys to the focused component.
 		if m.focusedPanel == 0 {
 			prevIdx := m.repoList.Index()
 			m.repoList, cmd = m.repoList.Update(msg)
 			if m.repoList.Index() != prevIdx {
-				// Sidebar selection changed — rebuild PR list.
-				cmd2 := m.rebuildPRList()
+				// Sidebar selection changed — rebuild PR table.
+				m.rebuildPRTable()
 				m.updateDetailView()
-				return m, tea.Batch(cmd, cmd2)
 			}
 			return m, cmd
 		} else if m.focusedPanel == 1 {
-			prevIdx := m.prList.Index()
-			m.prList, cmd = m.prList.Update(msg)
-			if m.prList.Index() != prevIdx {
+			prevCursor := m.prTable.Cursor()
+			m.prTable, cmd = m.prTable.Update(msg)
+			if m.prTable.Cursor() != prevCursor {
 				m.updateDetailView()
 			}
 			// Check for PR-specific actions.
@@ -379,6 +382,15 @@ func (m *Model) handleStatusActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// syncTableFocus ensures the PR table focus matches the current panel state.
+func (m *Model) syncTableFocus() {
+	if m.activeTab == TabPRs && m.focusedPanel == 1 {
+		m.prTable.Focus()
+	} else {
+		m.prTable.Blur()
+	}
 }
 
 func (m *Model) setFlash(text string, isError bool) {

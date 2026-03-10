@@ -1,49 +1,33 @@
 package ui
 
-
 // RenderPanel wraps static content in a bordered panel with a title line.
-// Used for non-list content (detail views, info panels, status).
-// The title is rendered as the first line inside the panel.
-func RenderPanel(theme *Theme, title, content string, focused bool, width, height int) string {
+func RenderPanel(title, content string, focused bool, width, height int) string {
 	if width < 4 || height < 3 {
 		return ""
 	}
 
-	style := theme.PanelBorder(focused)
-
-	// In lipgloss v2, Width/Height set the total outer dimension.
-	style = style.Width(width).Height(height)
+	style := PanelBorder(focused).Width(width).Height(height)
 
 	if title != "" {
-		titleStr := theme.PanelTitle(title, focused)
-		content = titleStr + "\n" + content
+		content = PanelTitle(title, focused) + "\n" + content
 	}
 
 	return style.Render(content)
 }
 
 // WrapListInPanel wraps a list.View() output in a bordered panel.
-// The list handles its own title — this just adds the border frame.
-func WrapListInPanel(theme *Theme, title, listView string, focused bool, width, height int) string {
+func WrapListInPanel(listView string, focused bool, width, height int) string {
 	if width < 4 || height < 3 {
 		return ""
 	}
 
-	style := theme.PanelBorder(focused)
-
-	// In lipgloss v2, Width/Height set the total outer dimension.
-	style = style.Width(width).Height(height)
-
-	// The list bubble manages its own content. We don't pad or trim
-	// here — just wrap in a border frame.
-	_ = title // list panels: title is managed by the list.Model itself.
-
+	style := PanelBorder(focused).Width(width).Height(height)
 	return style.Render(listView)
 }
 
 // InnerSize returns the content width and height available inside a panel.
-func InnerSize(theme *Theme, width, height int) (int, int) {
-	style := theme.PanelBorder(false)
+func InnerSize(width, height int) (int, int) {
+	style := InactiveBorder
 	iw := width - style.GetHorizontalFrameSize()
 	ih := height - style.GetVerticalFrameSize()
 	if iw < 1 {

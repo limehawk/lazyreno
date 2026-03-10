@@ -8,6 +8,7 @@ import (
 )
 
 // RepoItem wraps a repo name + PR count for the sidebar list.
+// Used with list.DefaultDelegate (shows Title + optional Description).
 type RepoItem struct {
 	Name    string
 	PRCount int
@@ -17,23 +18,16 @@ func (i RepoItem) FilterValue() string { return i.Name }
 func (i RepoItem) Title() string       { return i.Name }
 func (i RepoItem) Description() string { return fmt.Sprintf("%d PRs", i.PRCount) }
 
-// PRItem wraps a backend.PR for the main PR list.
-type PRItem struct {
-	PR backend.PR
+// AllRepoItem wraps a repo name for the Repos tab sidebar.
+type AllRepoItem struct {
+	Name string
 }
 
-func (i PRItem) FilterValue() string { return i.PR.Title }
-func (i PRItem) Title() string       { return i.PR.Title }
-func (i PRItem) Description() string {
-	ut := i.PR.UpdateType
-	if ut == "" {
-		ut = "dep"
-	}
-	age := backend.RelativeTime(i.PR.CreatedAt)
-	return fmt.Sprintf("%s  %s", ut, age)
-}
+func (i AllRepoItem) FilterValue() string { return i.Name }
+func (i AllRepoItem) Title() string       { return i.Name }
+func (i AllRepoItem) Description() string { return "" }
 
-// JobItem wraps a backend.Job for the jobs list.
+// JobItem wraps a backend.Job for the jobs list sidebar.
 type JobItem struct {
 	Job backend.Job
 }
@@ -46,12 +40,3 @@ func (i JobItem) Title() string {
 	return i.Job.Repo
 }
 func (i JobItem) Description() string { return i.Job.Status }
-
-// AllRepoItem wraps a repo name for the Repos tab sidebar.
-type AllRepoItem struct {
-	Name string
-}
-
-func (i AllRepoItem) FilterValue() string { return i.Name }
-func (i AllRepoItem) Title() string       { return i.Name }
-func (i AllRepoItem) Description() string { return "" }
