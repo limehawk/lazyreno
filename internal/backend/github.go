@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v72/github"
+	"github.com/google/go-github/v82/github"
 )
 
 type GitHubClient struct {
