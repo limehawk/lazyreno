@@ -1,0 +1,5 @@
+fileignoreconfig:
+  - filename: go.sum
+    checksum: ""
+    ignore_detectors:
+      - filecontent
