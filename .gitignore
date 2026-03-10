@@ -1,0 +1,9 @@
+/lazyreno
+dist/
+*.exe
+pkg/
+src/
+*.pkg.tar.zst
+CLAUDE.md
+docs/
+.talismanrc
