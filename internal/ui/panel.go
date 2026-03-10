@@ -17,48 +17,83 @@ type Panel struct {
 }
 
 func (p Panel) View() string {
-	style := UnfocusedBorder
-	if p.Focused {
-		style = FocusedBorder
+	if p.Width < 4 || p.Height < 3 {
+		return ""
 	}
 
-	// Account for border (2 chars each side)
+	borderColor := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	if p.Focused {
+		borderColor = lipgloss.NewStyle().Foreground(Accent)
+		titleStyle = lipgloss.NewStyle().Foreground(Accent).Bold(true)
+	}
+
 	innerWidth := p.Width - 2
 	innerHeight := p.Height - 2
-	if innerWidth < 0 {
-		innerWidth = 0
-	}
-	if innerHeight < 0 {
-		innerHeight = 0
-	}
 
-	rendered := style.
-		Width(innerWidth).
-		Height(innerHeight).
-		Render(lipgloss.Place(
-			innerWidth, innerHeight,
-			lipgloss.Left, lipgloss.Top,
-			p.Content,
-		))
+	// Build top border: ╭─ Title ────────╮
+	topLeft := borderColor.Render("╭")
+	topRight := borderColor.Render("╮")
+	bottomLeft := borderColor.Render("╰")
+	bottomRight := borderColor.Render("╯")
+	hBar := borderColor.Render("─")
+	vBar := borderColor.Render("│")
 
-	// Overlay title onto top border
+	var topLine string
 	if p.Title != "" {
-		titleStr := " " + p.Title + " "
-		lines := strings.SplitN(rendered, "\n", 2)
-		if len(lines) >= 1 {
-			topBorder := []rune(lines[0])
-			titleRunes := []rune(titleStr)
-			// Place title starting at position 2 (after corner + border char)
-			insertAt := 2
-			if insertAt+len(titleRunes) < len(topBorder) {
-				for i, r := range titleRunes {
-					topBorder[insertAt+i] = r
-				}
-			}
-			lines[0] = string(topBorder)
-			rendered = strings.Join(lines, "\n")
+		titleStr := titleStyle.Render(" " + p.Title + " ")
+		titleVisualWidth := lipgloss.Width(titleStr)
+		remainingBars := innerWidth - titleVisualWidth
+		if remainingBars < 0 {
+			remainingBars = 0
 		}
+		leftBars := 1
+		rightBars := remainingBars - leftBars
+		if rightBars < 0 {
+			rightBars = 0
+		}
+		topLine = topLeft + strings.Repeat(hBar, leftBars) + titleStr + strings.Repeat(hBar, rightBars) + topRight
+	} else {
+		topLine = topLeft + strings.Repeat(hBar, innerWidth) + topRight
 	}
 
-	return rendered
+	// Build bottom border: ╰────────────────╯
+	bottomLine := bottomLeft + strings.Repeat(hBar, innerWidth) + bottomRight
+
+	// Pad/truncate content to fit inner dimensions
+	contentLines := strings.Split(p.Content, "\n")
+	for len(contentLines) < innerHeight {
+		contentLines = append(contentLines, "")
+	}
+	if len(contentLines) > innerHeight {
+		contentLines = contentLines[:innerHeight]
+	}
+
+	// Build middle rows with vertical borders
+	var rows []string
+	rows = append(rows, topLine)
+	for _, line := range contentLines {
+		lineWidth := lipgloss.Width(line)
+		padding := innerWidth - lineWidth
+		if padding < 0 {
+			// Truncate if line is too wide — crude but functional
+			line = runeSlice(line, innerWidth-1) + "…"
+			padding = 0
+		}
+		rows = append(rows, vBar+line+strings.Repeat(" ", padding)+vBar)
+	}
+	rows = append(rows, bottomLine)
+
+	return strings.Join(rows, "\n")
+}
+
+// runeSlice returns up to n visible characters from a string,
+// being careful about multi-byte runes. Does not handle ANSI well
+// but is a reasonable fallback.
+func runeSlice(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
 }

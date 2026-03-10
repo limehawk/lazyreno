@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -61,9 +62,22 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewPRs(height int) string {
-	// Group PRs by repo
 	prsByRepo := m.groupPRsByRepo()
 	repoOrder := m.getReposWithPRs(prsByRepo)
+
+	// Dynamic widths
+	sidebarWidth := 28
+	detailWidth := 30
+	mainWidth := m.width - sidebarWidth - detailWidth
+	if m.width < 120 {
+		detailWidth = 0
+		mainWidth = m.width - sidebarWidth
+	}
+	if m.width < 80 {
+		sidebarWidth = 22
+		mainWidth = m.width - sidebarWidth
+	}
+	sidebarInner := sidebarWidth - 4 // borders + padding
 
 	// Sidebar: repos with PR counts
 	var sidebarLines []string
@@ -74,15 +88,13 @@ func (m Model) viewPRs(height int) string {
 		if i == m.sidebarCursor {
 			prefix = ui.AccentText.Render("● ")
 		}
-		sidebarLines = append(sidebarLines, fmt.Sprintf("%s%-18s %d", prefix, truncate(repo, 18), len(prs)))
-	}
-
-	sidebarWidth := 26
-	detailWidth := 28
-	mainWidth := m.width - sidebarWidth - detailWidth
-	if m.width < 100 {
-		detailWidth = 0
-		mainWidth = m.width - sidebarWidth
+		nameWidth := sidebarInner - 5 // space for " XX"
+		line := fmt.Sprintf("%s%s %s",
+			prefix,
+			padRight(truncate(repo, nameWidth), nameWidth),
+			ui.Dim.Render(fmt.Sprintf("%2d", len(prs))),
+		)
+		sidebarLines = append(sidebarLines, line)
 	}
 
 	sidebar := ui.Panel{
@@ -94,6 +106,7 @@ func (m Model) viewPRs(height int) string {
 	}
 
 	// Main: PRs for selected repo
+	mainInner := mainWidth - 4
 	var mainLines []string
 	selectedRepo := ""
 	if m.sidebarCursor < len(repoOrder) {
@@ -111,13 +124,48 @@ func (m Model) viewPRs(height int) string {
 			if updateType == "" {
 				updateType = "dep"
 			}
-			mainLines = append(mainLines, fmt.Sprintf("%s%-30s %5s %5s", prefix, truncate(pr.Title, 30), updateType, age))
+			// Color the update type
+			typeStr := ui.Dim.Render(updateType)
+			if updateType == "major" {
+				typeStr = ui.WarningText.Render(updateType)
+			}
+			titleWidth := mainInner - 18 // space for type + age
+			if titleWidth < 20 {
+				titleWidth = 20
+			}
+			line := fmt.Sprintf("%s%s  %s  %s",
+				prefix,
+				padRight(truncate(pr.Title, titleWidth), titleWidth),
+				typeStr,
+				ui.Dim.Render(fmt.Sprintf("%7s", age)),
+			)
+			mainLines = append(mainLines, line)
 		}
+	}
+
+	// Footer line
+	totalPRs := len(m.prs)
+	mergeableCount := 0
+	for _, pr := range m.prs {
+		if pr.Mergeable {
+			mergeableCount++
+		}
+	}
+	footer := ui.Dim.Render(fmt.Sprintf(" %d PRs total  %d mergeable", totalPRs, mergeableCount))
+
+	mainContent := strings.Join(mainLines, "\n")
+	if len(mainLines) < height-3 && footer != "" {
+		// Add footer at bottom
+		padding := height - 3 - len(mainLines) - 1
+		if padding > 0 {
+			mainContent += strings.Repeat("\n", padding)
+		}
+		mainContent += "\n" + footer
 	}
 
 	main := ui.Panel{
 		Title:   "Pull Requests",
-		Content: strings.Join(mainLines, "\n"),
+		Content: mainContent,
 		Focused: m.focusedPanel == 1,
 		Width:   mainWidth,
 		Height:  height,
@@ -132,18 +180,27 @@ func (m Model) viewPRs(height int) string {
 			prs := prsByRepo[fullName]
 			if m.mainCursor < len(prs) {
 				pr := prs[m.mainCursor]
-				mergeable := "✗ conflict"
+				mergeStatus := ui.ErrorText.Render("✗ conflict")
 				if pr.Mergeable {
-					mergeable = "✓ mergeable"
+					mergeStatus = ui.SuccessText.Render("✓ mergeable")
 				}
-				checks := "✗ failing"
+				checkStatus := ui.ErrorText.Render("✗ failing")
 				if pr.ChecksPass {
-					checks = "✓ passing"
+					checkStatus = ui.SuccessText.Render("✓ passing")
 				}
+				titleWidth := detailWidth - 4
 				detailContent = fmt.Sprintf(
-					"#%d %s\n\nBranch: %s\nBase:   %s\nChecks: %s\nMerge:  %s\nAge:    %s\nType:   %s\n\n[m]erge [c]lose\n[o]pen in browser",
-					pr.Number, truncate(pr.Title, 22), pr.Branch, pr.Base, checks, mergeable,
-					backend.RelativeTime(pr.CreatedAt), pr.UpdateType,
+					"%s\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n\n%s  %s\n%s",
+					ui.Bold.Render(fmt.Sprintf("#%d", pr.Number)),
+					truncate(pr.Title, titleWidth),
+					ui.Dim.Render("Branch:"), pr.Branch,
+					ui.Dim.Render("Base:  "), pr.Base,
+					ui.Dim.Render("Checks:"), checkStatus,
+					ui.Dim.Render("Merge: "), mergeStatus,
+					ui.Dim.Render("Age:   "), backend.RelativeTime(pr.CreatedAt),
+					ui.Dim.Render("Type:  "), pr.UpdateType,
+					ui.AccentText.Render("[m]"), "merge",
+					ui.AccentText.Render("[c]")+" close  "+ui.AccentText.Render("[o]")+" open",
 				)
 			}
 		}
@@ -162,8 +219,9 @@ func (m Model) viewPRs(height int) string {
 }
 
 func (m Model) viewRepos(height int) string {
-	sidebarWidth := 26
+	sidebarWidth := 28
 	mainWidth := m.width - sidebarWidth
+	sidebarInner := sidebarWidth - 4
 
 	var sidebarLines []string
 	for i, repo := range m.repos {
@@ -171,18 +229,18 @@ func (m Model) viewRepos(height int) string {
 		if i == m.sidebarCursor {
 			prefix = ui.AccentText.Render("● ")
 		}
-		sidebarLines = append(sidebarLines, fmt.Sprintf("%s%s", prefix, truncate(repo, 22)))
+		sidebarLines = append(sidebarLines, fmt.Sprintf("%s%s", prefix, truncate(repo, sidebarInner-2)))
 	}
 
 	sidebar := ui.Panel{
-		Title:   "Repos",
+		Title:   fmt.Sprintf("Repos (%d)", len(m.repos)),
 		Content: strings.Join(sidebarLines, "\n"),
 		Focused: m.focusedPanel == 0,
 		Width:   sidebarWidth,
 		Height:  height,
 	}
 
-	mainContent := "Select a repo"
+	mainContent := ui.Dim.Render("Select a repo")
 	if m.sidebarCursor < len(m.repos) {
 		repo := m.repos[m.sidebarCursor]
 		fullName := m.cfg.GitHub.Owner + "/" + repo
@@ -193,7 +251,19 @@ func (m Model) viewRepos(height int) string {
 				prCount++
 			}
 		}
-		mainContent = fmt.Sprintf("Repository:  %s\nOpen PRs:    %d", fullName, prCount)
+
+		prCountStr := ui.SuccessText.Render(fmt.Sprintf("%d", prCount))
+		if prCount > 0 {
+			prCountStr = ui.WarningText.Render(fmt.Sprintf("%d", prCount))
+		}
+
+		mainContent = fmt.Sprintf(
+			"%s  %s\n%s  %s",
+			ui.Dim.Render("Repository:"),
+			ui.Bold.Render(fullName),
+			ui.Dim.Render("Open PRs:  "),
+			prCountStr,
+		)
 	}
 
 	main := ui.Panel{
@@ -208,7 +278,7 @@ func (m Model) viewRepos(height int) string {
 }
 
 func (m Model) viewJobs(height int) string {
-	sidebarWidth := 26
+	sidebarWidth := 28
 	mainWidth := m.width - sidebarWidth
 
 	var sidebarLines []string
@@ -233,7 +303,7 @@ func (m Model) viewJobs(height int) string {
 			repoShort = parts[1]
 		}
 		sidebarLines = append(sidebarLines,
-			fmt.Sprintf("%s%s %-14s %s", prefix, statusIcon, truncate(repoShort, 14), job.Status))
+			fmt.Sprintf("%s%s %s  %s", prefix, statusIcon, padRight(truncate(repoShort, 14), 14), ui.Dim.Render(job.Status)))
 	}
 
 	if len(m.jobs) == 0 {
@@ -248,11 +318,16 @@ func (m Model) viewJobs(height int) string {
 		Height:  height,
 	}
 
-	mainContent := "Select a job"
+	mainContent := ui.Dim.Render("Select a job")
 	if m.sidebarCursor < len(m.jobs) {
 		job := m.jobs[m.sidebarCursor]
-		mainContent = fmt.Sprintf("Job:    %s\nRepo:   %s\nStatus: %s\n\n[r]etry  [p]urge failed",
-			job.ID, job.Repo, job.Status)
+		mainContent = fmt.Sprintf(
+			"%s  %s\n%s  %s\n%s  %s\n\n%s  %s",
+			ui.Dim.Render("Job:   "), job.ID,
+			ui.Dim.Render("Repo:  "), ui.Bold.Render(job.Repo),
+			ui.Dim.Render("Status:"), job.Status,
+			ui.AccentText.Render("[r]"), "retry  "+ui.AccentText.Render("[p]")+" purge failed",
+		)
 	}
 
 	main := ui.Panel{
@@ -273,26 +348,34 @@ func (m Model) viewStatus(height int) string {
 		lines = []string{
 			"",
 			ui.WarningText.Render("  Renovate CE not configured"),
+			"",
 			ui.Dim.Render("  Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET"),
 		}
 	} else if m.status == nil {
-		lines = append(lines, ui.Dim.Render("  Connecting to Renovate CE..."))
+		lines = append(lines, "", ui.Dim.Render("  Connecting to Renovate CE..."))
 	} else {
 		s := m.status
 		connected := ui.SuccessText.Render("✓ connected")
 		uptime := s.Uptime.Truncate(time.Minute).String()
 
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("  Renovate CE %s          API: %s       Uptime: %s",
-			ui.Bold.Render(s.Version), connected, uptime))
-		lines = append(lines, fmt.Sprintf("  Jobs: %d queued            Failed: %d",
-			s.QueueSize, s.FailedJobs))
+		lines = append(lines, fmt.Sprintf("  %s %s          %s %s       %s %s",
+			ui.Dim.Render("Renovate CE"), ui.Bold.Render(s.Version),
+			ui.Dim.Render("API:"), connected,
+			ui.Dim.Render("Uptime:"), uptime))
+		lines = append(lines, fmt.Sprintf("  %s %d            %s %d",
+			ui.Dim.Render("Jobs:"), s.QueueSize,
+			ui.Dim.Render("Failed:"), s.FailedJobs))
 		lines = append(lines, "")
-		lines = append(lines, ui.Dim.Render("  "+strings.Repeat("─", max(m.width-6, 0))))
+		divWidth := m.width - 6
+		if divWidth < 0 {
+			divWidth = 0
+		}
+		lines = append(lines, ui.Dim.Render("  "+strings.Repeat("─", divWidth)))
 		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("  %s  %s",
-			ui.AccentText.Render("[s]ync now"),
-			ui.AccentText.Render("[p]urge failed")))
+		lines = append(lines, fmt.Sprintf("  %s sync now   %s purge failed",
+			ui.AccentText.Render("[s]"),
+			ui.AccentText.Render("[p]")))
 	}
 
 	return ui.Panel{
@@ -326,8 +409,20 @@ func (m Model) helpEntries() []ui.HelpEntry {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-1] + "…"
+	runes := []rune(s)
+	if maxLen <= 1 {
+		return "…"
+	}
+	return string(runes[:maxLen-1]) + "…"
+}
+
+func padRight(s string, width int) string {
+	visWidth := lipgloss.Width(s)
+	if visWidth >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-visWidth)
 }
