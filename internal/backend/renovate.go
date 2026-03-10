@@ -40,19 +40,46 @@ func (c *RenovateClient) GetStatus() (*SystemStatus, error) {
 	defer resp.Body.Close()
 
 	var raw struct {
-		Version  string          `json:"version"`
-		BootTime time.Time       `json:"bootTime"`
-		Enabled  map[string]bool `json:"enabled"`
+		RenovateVersion string `json:"renovateVersion"`
+		BootTime        string `json:"bootTime"`
+		App             struct {
+			OrganizationCount int `json:"organizationCount"`
+			RepositoryCount   int `json:"repositoryCount"`
+		} `json:"app"`
+		Jobs struct {
+			Queue struct {
+				Size       int `json:"size"`
+				InProgress []struct {
+					JobID      string `json:"jobId"`
+					Repository string `json:"repository"`
+				} `json:"inProgress"`
+			} `json:"queue"`
+			History struct {
+				Processed int `json:"processed"`
+			} `json:"history"`
+		} `json:"jobs"`
+		Scheduler struct {
+			Sync struct {
+				Cron string `json:"cron"`
+			} `json:"sync"`
+		} `json:"scheduler"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
 
+	// Parse boot time — format is "2006-01-02 15:04:05"
+	bootTime, _ := time.Parse("2006-01-02 15:04:05", raw.BootTime)
+
 	return &SystemStatus{
-		Version:  raw.Version,
-		BootTime: raw.BootTime,
-		Uptime:   time.Since(raw.BootTime),
-		Enabled:  raw.Enabled,
+		Version:    raw.RenovateVersion,
+		BootTime:   bootTime,
+		Uptime:     time.Since(bootTime),
+		QueueSize:  raw.Jobs.Queue.Size,
+		RunningJob: len(raw.Jobs.Queue.InProgress),
+		Enabled: map[string]bool{
+			"api": true,
+		},
 	}, nil
 }
 
@@ -65,11 +92,11 @@ func (c *RenovateClient) GetJobQueue() ([]Job, error) {
 
 	var raw struct {
 		Running []struct {
-			ID         string `json:"id"`
+			JobID      string `json:"jobId"`
 			Repository string `json:"repository"`
 		} `json:"running"`
 		Pending []struct {
-			ID         string `json:"id"`
+			JobID      string `json:"jobId"`
 			Repository string `json:"repository"`
 		} `json:"pending"`
 	}
@@ -79,10 +106,10 @@ func (c *RenovateClient) GetJobQueue() ([]Job, error) {
 
 	var jobs []Job
 	for _, j := range raw.Running {
-		jobs = append(jobs, Job{ID: j.ID, Repo: j.Repository, Status: "running"})
+		jobs = append(jobs, Job{ID: j.JobID, Repo: j.Repository, Status: "running"})
 	}
 	for _, j := range raw.Pending {
-		jobs = append(jobs, Job{ID: j.ID, Repo: j.Repository, Status: "pending"})
+		jobs = append(jobs, Job{ID: j.JobID, Repo: j.Repository, Status: "pending"})
 	}
 	return jobs, nil
 }

@@ -16,13 +16,20 @@ func TestRenovateStatus(t *testing.T) {
 			t.Errorf("missing auth header")
 		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"version":  "14.1.0",
-			"bootTime": "2026-03-10T00:00:00Z",
-			"enabled": map[string]bool{
-				"api":       true,
-				"system":    true,
-				"reporting": true,
-				"jobs":      true,
+			"renovateVersion": "43.55.4",
+			"bootTime":        "2026-03-10 14:57:05",
+			"app": map[string]any{
+				"organizationCount": 1,
+				"repositoryCount":   43,
+			},
+			"jobs": map[string]any{
+				"queue": map[string]any{
+					"size":       2,
+					"inProgress": []any{},
+				},
+				"history": map[string]any{
+					"processed": 43,
+				},
 			},
 		})
 	}))
@@ -33,8 +40,11 @@ func TestRenovateStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if status.Version != "14.1.0" {
-		t.Errorf("expected version 14.1.0, got %s", status.Version)
+	if status.Version != "43.55.4" {
+		t.Errorf("expected version 43.55.4, got %s", status.Version)
+	}
+	if status.QueueSize != 2 {
+		t.Errorf("expected queue size 2, got %d", status.QueueSize)
 	}
 }
 
@@ -45,10 +55,10 @@ func TestRenovateJobQueue(t *testing.T) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"running": []map[string]any{
-				{"id": "job-1", "repository": "limehawk/gruman-law-website"},
+				{"jobId": "job-1", "repository": "limehawk/gruman-law-website"},
 			},
 			"pending": []map[string]any{
-				{"id": "job-2", "repository": "limehawk/mill-mama-website"},
+				{"jobId": "job-2", "repository": "limehawk/mill-mama-website"},
 			},
 		})
 	}))
