@@ -77,8 +77,8 @@ func newSidebarList(title string) list.Model {
 
 	d.Styles.SelectedTitle = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, false, true).
-		BorderForeground(ui.Blue).
-		Foreground(ui.Blue).
+		BorderForeground(ui.Accent).
+		Foreground(ui.Accent).
 		Padding(0, 0, 0, 1)
 	d.Styles.NormalTitle = lipgloss.NewStyle().
 		Padding(0, 0, 0, 2)
@@ -95,7 +95,7 @@ func newSidebarList(title string) list.Model {
 
 	styles := l.Styles
 	styles.TitleBar = lipgloss.NewStyle()
-	styles.Title = ui.AccentText
+	styles.Title = lipgloss.NewStyle().Foreground(ui.Title).Bold(true)
 	l.Styles = styles
 
 	return l
@@ -117,21 +117,22 @@ func newPRTable() table.Model {
 	)
 }
 
-// prTableStyles builds table.Styles from ANSI colors.
+// prTableStyles builds table.Styles from theme colors.
 func prTableStyles() table.Styles {
 	return table.Styles{
 		Header: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ui.Blue).
+			Foreground(ui.Accent).
 			Padding(0, 1).
 			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(ui.Gray).
+			BorderForeground(ui.Border).
 			BorderBottom(true),
 		Cell: lipgloss.NewStyle().
 			Padding(0, 1),
 		Selected: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ui.Blue).
+			Foreground(ui.SelectedFG).
+			Background(ui.SelectedBG).
 			Padding(0, 1),
 	}
 }
@@ -152,7 +153,7 @@ func NewModel(cfg *config.Config) Model {
 	s.ShortKey = ui.ShortcutKey
 	s.FullKey = ui.ShortcutKey
 	s.ShortDesc = ui.Dim
-	s.ShortSeparator = lipgloss.NewStyle().Foreground(ui.Gray)
+	s.ShortSeparator = lipgloss.NewStyle().Foreground(ui.Border)
 	h.Styles = s
 
 	return Model{
