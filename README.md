@@ -33,15 +33,31 @@ Create `~/.config/lazyreno/config.toml`:
 ```toml
 [renovate]
 url = "https://your-renovate-instance.example.com"
+secret = "your-renovate-api-secret"
 
 [github]
 owner = "your-github-org"
+token = "your-github-token"
 
 [ui]
 refresh_interval = "30s"
 ```
 
-Set secrets via environment variables:
+### 1Password
+
+Secrets can be [1Password secret references](https://developer.1password.com/docs/cli/secret-references/) — they'll be resolved automatically via the `op` CLI:
+
+```toml
+[renovate]
+secret = "op://Dev/Renovate CE API/credential"
+
+[github]
+token = "op://Dev/My GitHub Token/token"
+```
+
+### Environment variables
+
+Secrets can also be set via environment variables, which override config file values:
 
 ```bash
 export LAZYRENO_RENOVATE_SECRET="your-renovate-api-secret"
