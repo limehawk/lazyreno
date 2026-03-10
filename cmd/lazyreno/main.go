@@ -3,9 +3,33 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/limehawk/lazyreno/internal/app"
+	"github.com/limehawk/lazyreno/internal/config"
 )
 
 func main() {
-	fmt.Println("lazyreno")
-	os.Exit(0)
+	// Find config file
+	configPath := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		candidate := filepath.Join(home, ".config", "lazyreno", "config.toml")
+		if _, err := os.Stat(candidate); err == nil {
+			configPath = candidate
+		}
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	m := app.NewModel(cfg)
+	p := tea.NewProgram(m)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 }
