@@ -10,7 +10,14 @@ import (
 	"github.com/limehawk/lazyreno/internal/config"
 )
 
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
+		fmt.Println("lazyreno " + version)
+		return
+	}
+
 	// Find config file
 	configPath := ""
 	if home, err := os.UserHomeDir(); err == nil {
