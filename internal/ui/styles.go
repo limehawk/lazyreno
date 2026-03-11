@@ -31,8 +31,6 @@ var (
 	ErrorText   lipgloss.Style
 	WarningText lipgloss.Style
 	SuccessText lipgloss.Style
-	ActiveTab   lipgloss.Style
-	InactiveTab lipgloss.Style
 	ActiveBorder   lipgloss.Style
 	InactiveBorder lipgloss.Style
 	ShortcutKey    lipgloss.Style
@@ -70,13 +68,6 @@ func init() {
 	ErrorText = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	WarningText = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	SuccessText = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-
-	ActiveTab = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(Accent).
-		Padding(0, 1)
-
-	InactiveTab = Dim.Padding(0, 1)
 
 	ActiveBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
