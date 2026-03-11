@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,36 +20,36 @@ func (m Model) View() tea.View {
 		return view("Loading...")
 	}
 
-	if m.confirmForm != nil {
-		return view(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.confirmForm.View()))
-	}
-
 	// Repos overlay
 	if m.showRepos {
 		return view(m.viewReposOverlay())
 	}
 
-	// Status bar
+	// Status bar: lazyreno ⣾  ▸ repo-name (3)             updated 12s ago
 	updatedAgo := ""
 	if !m.lastUpdate.IsZero() {
 		d := time.Since(m.lastUpdate).Truncate(time.Second)
 		updatedAgo = "updated " + d.String() + " ago"
 	}
-	header := ui.RenderStatusBar(m.spinner.View(), updatedAgo, m.width)
+	header := ui.RenderStatusBar(m.spinner.View(), m.repoInfo(), updatedAgo, m.width)
 
-	// Help bar
-	helpBar := m.help.View(m.keys)
-
-	var bottomLines []string
-	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
-		style := ui.SuccessText
-		if m.flashIsError {
-			style = ui.ErrorText
+	// Bottom bar: either confirm prompt or help
+	var bottom string
+	if m.confirmText != "" {
+		bottom = ui.WarningText.Render(m.confirmText)
+	} else {
+		helpBar := m.help.View(m.keys)
+		var bottomLines []string
+		if m.flashText != "" && time.Now().Before(m.flashExpiry) {
+			style := ui.SuccessText
+			if m.flashIsError {
+				style = ui.ErrorText
+			}
+			bottomLines = append(bottomLines, style.Render(m.flashText))
 		}
-		bottomLines = append(bottomLines, style.Render(m.flashText))
+		bottomLines = append(bottomLines, helpBar)
+		bottom = lipgloss.JoinVertical(lipgloss.Left, bottomLines...)
 	}
-	bottomLines = append(bottomLines, helpBar)
-	bottom := lipgloss.JoinVertical(lipgloss.Left, bottomLines...)
 
 	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(bottom)
 	if bodyHeight < 1 {
@@ -61,50 +62,46 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewDashboard(height int) string {
-	leftWidth, rightWidth := m.panelWidths()
+	// Table takes top ~60%, bento grid takes bottom ~40%
+	tableH := height * 60 / 100
+	bentoH := height - tableH
 
-	// Left column: stacked panels
-	systemH := 5
-	jobsH := 8
-	prListH := height - systemH - jobsH
-	if prListH < 6 {
-		prListH = 6
-	}
-
-	prSidebar := ui.WrapListInPanel(
-		m.repoList.View(),
-		m.focusedPanel == 0, leftWidth, prListH,
-	)
-
-	systemPanel := ui.RenderPanel(
-		"System", m.renderStatusBox(),
-		false, leftWidth, systemH,
-	)
-
-	jobsPanel := ui.WrapListInPanel(
-		m.jobList.View(),
-		false, leftWidth, jobsH,
-	)
-
-	leftCol := lipgloss.JoinVertical(lipgloss.Left, prSidebar, systemPanel, jobsPanel)
-
-	// Right column: PR table top, detail bottom
-	tableH := height * 55 / 100
-	detailH := height - tableH
-
+	// Full-width PR table
 	tablePanel := ui.RenderPanel(
 		"", m.prTable.View(),
-		m.focusedPanel == 1, rightWidth, tableH,
+		m.focusedPanel == 0, m.width, tableH,
 	)
+
+	// Bottom bento: Detail | System | Jobs
+	detailW, systemW, jobsW := m.bentoPanelWidths()
 
 	detailPanel := ui.RenderPanel(
 		"Details", m.detailView.View(),
-		m.focusedPanel == 2, rightWidth, detailH,
+		m.focusedPanel == 1, detailW, bentoH,
 	)
 
-	rightCol := lipgloss.JoinVertical(lipgloss.Left, tablePanel, detailPanel)
+	systemContent := m.renderStatusBox()
+	if m.renovate != nil {
+		systemContent += fmt.Sprintf("\n\n%s sync  %s purge",
+			ui.ShortcutKey.Render("[s]"), ui.ShortcutKey.Render("[p]"))
+	}
+	systemPanel := ui.RenderPanel(
+		"System", systemContent,
+		false, systemW, bentoH,
+	)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, rightCol)
+	jobsTitle := "Jobs"
+	if len(m.jobs) > 0 {
+		jobsTitle = fmt.Sprintf("Jobs (%d)", len(m.jobs))
+	}
+	jobsPanel := ui.RenderPanel(
+		jobsTitle, m.renderJobsPanel(),
+		false, jobsW, bentoH,
+	)
+
+	bentoRow := lipgloss.JoinHorizontal(lipgloss.Top, detailPanel, systemPanel, jobsPanel)
+
+	return lipgloss.JoinVertical(lipgloss.Left, tablePanel, bentoRow)
 }
 
 func (m Model) viewReposOverlay() string {

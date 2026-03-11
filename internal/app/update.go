@@ -8,8 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/huh/v2"
-	"github.com/limehawk/lazyreno/internal/ui"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -29,27 +27,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// non-key, non-special messages fall through
 	}
 
-	// Forward messages to the confirm form when active.
-	if m.confirmForm != nil {
-		model, cmd := m.confirmForm.Update(msg)
-		m.confirmForm = model.(*huh.Form)
-		if m.confirmForm.State == huh.StateCompleted {
-			if m.confirmed != nil && *m.confirmed {
-				actionCmd := m.confirmFn()
-				m.confirmForm = nil
-				m.confirmFn = nil
-				return m, tea.Batch(cmd, actionCmd)
+	// Inline confirm intercepts next keypress.
+	if m.confirmText != "" {
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			if key.Matches(msg, key.NewBinding(key.WithKeys("y"))) {
+				action := m.confirmAction
+				m.confirmText = ""
+				m.confirmAction = nil
+				return m, action()
 			}
-			m.confirmForm = nil
-			m.confirmFn = nil
-			return m, cmd
+			m.confirmText = ""
+			m.confirmAction = nil
 		}
-		if m.confirmForm.State == huh.StateAborted {
-			m.confirmForm = nil
-			m.confirmFn = nil
-			return m, cmd
-		}
-		return m, cmd
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -75,6 +65,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, GlobalKeys.Repos):
 			m.showRepos = !m.showRepos
 			return m, nil
+		case key.Matches(msg, GlobalKeys.NextRepo):
+			m.cycleRepo(1)
+			return m, nil
+		case key.Matches(msg, GlobalKeys.PrevRepo):
+			m.cycleRepo(-1)
+			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusNext):
 			m.focusNext()
 			return m, nil
@@ -94,13 +90,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return SyncTriggeredMsg{Err: err}
 				}
 			case key.Matches(msg, GlobalKeys.Purge):
-				cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
+				m.showConfirm("Purge all failed jobs? [y/n]", func() tea.Cmd {
 					return func() tea.Msg {
 						err := m.renovate.PurgeFailedJobs()
 						return PurgeResultMsg{Err: err}
 					}
 				})
-				return m, cmd
+				return m, nil
 			}
 		}
 
@@ -129,10 +125,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.prs = m.pendingPRs
 				m.pendingPRs = nil
 				m.lastUpdate = time.Now()
-				cmd1 := m.rebuildRepoList()
+				m.rebuildRepoList()
 				m.rebuildPRTable()
 				m.updateDetailView()
-				return m, cmd1
 			}
 		}
 	case SystemStatusFetchedMsg:
@@ -140,14 +135,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.status = msg.Status
-			m.rebuildJobList()
 		}
 	case JobQueueFetchedMsg:
 		if msg.Err != nil {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.jobs = msg.Jobs
-			m.rebuildJobList()
 		}
 	case MergePRResultMsg:
 		if msg.Err != nil {
@@ -155,10 +148,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Merged #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
-			cmd1 := m.rebuildRepoList()
+			m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
-			return m, cmd1
 		}
 	case ClosePRResultMsg:
 		if msg.Err != nil {
@@ -166,10 +158,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Closed #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
-			cmd1 := m.rebuildRepoList()
+			m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
-			return m, cmd1
 		}
 	case SyncTriggeredMsg:
 		if msg.Err != nil {
@@ -203,35 +194,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) updateFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// Arrow keys for panel navigation.
-	if key.Matches(msg, GlobalKeys.Right) {
-		if m.focusedPanel < m.maxPanel() {
-			m.focusNext()
-		}
-		return m, nil
-	}
-	if key.Matches(msg, GlobalKeys.Left) {
-		if m.focusedPanel > 0 {
-			m.focusPrev()
-		}
-		return m, nil
-	}
-
-	// Forward keys to the focused component.
 	switch m.focusedPanel {
-	case 0: // sidebar
-		if key.Matches(msg, GlobalKeys.Enter) {
-			m.focusNext()
-			return m, nil
-		}
-		prevIdx := m.repoList.Index()
-		m.repoList, cmd = m.repoList.Update(msg)
-		if m.repoList.Index() != prevIdx {
-			m.rebuildPRTable()
-			m.updateDetailView()
-		}
-		return m, cmd
-	case 1: // PR table
+	case 0: // PR table
+		// PR-specific actions.
 		if key.Matches(msg, key.NewBinding(key.WithKeys("m", "M", "c", "o", "enter"))) {
 			return m.handlePRActions(msg)
 		}
@@ -241,7 +206,7 @@ func (m *Model) updateFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.updateDetailView()
 		}
 		return m, cmd
-	case 2: // detail viewport
+	case 1: // detail viewport
 		m.detailView, cmd = m.detailView.Update(msg)
 		return m, cmd
 	}
@@ -249,20 +214,9 @@ func (m *Model) updateFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) showConfirm(message string, fn func() tea.Cmd) tea.Cmd {
-	confirmed := false
-	m.confirmed = &confirmed
-	m.confirmFn = fn
-	m.confirmForm = huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title(message).
-				Affirmative("Yes").
-				Negative("No").
-				Value(m.confirmed),
-		),
-	).WithWidth(40).WithTheme(huh.ThemeFunc(ui.HuhTheme))
-	return m.confirmForm.Init()
+func (m *Model) showConfirm(message string, fn func() tea.Cmd) {
+	m.confirmText = message
+	m.confirmAction = fn
 }
 
 func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -274,14 +228,14 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("m", "enter"))):
 		pr := *selectedPR
-		cmd := m.showConfirm(fmt.Sprintf("Merge #%d into %s?", pr.Number, pr.Base), func() tea.Cmd {
+		m.showConfirm(fmt.Sprintf("Merge #%d into %s? [y/n]", pr.Number, pr.Base), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
 				err := m.github.MergePR(owner, repo, pr.Number)
 				return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
 		})
-		return m, cmd
+		return m, nil
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("M"))):
 		safePRs := m.getSafePRsForSelectedRepo()
@@ -289,7 +243,7 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setFlash("No safe PRs to merge", true)
 			return m, nil
 		}
-		cmd := m.showConfirm(fmt.Sprintf("Merge %d safe PRs?", len(safePRs)), func() tea.Cmd {
+		m.showConfirm(fmt.Sprintf("Merge %d safe PRs? [y/n]", len(safePRs)), func() tea.Cmd {
 			var cmds []tea.Cmd
 			for _, pr := range safePRs {
 				pr := pr
@@ -301,18 +255,18 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return tea.Batch(cmds...)
 		})
-		return m, cmd
+		return m, nil
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
 		pr := *selectedPR
-		cmd := m.showConfirm(fmt.Sprintf("Close #%d and delete branch?", pr.Number), func() tea.Cmd {
+		m.showConfirm(fmt.Sprintf("Close #%d and delete branch? [y/n]", pr.Number), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
 				err := m.github.ClosePR(owner, repo, pr.Number, pr.Branch)
 				return ClosePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
 		})
-		return m, cmd
+		return m, nil
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("o"))):
 		return m, tea.ExecProcess(exec.Command("xdg-open", selectedPR.URL), nil)
@@ -323,7 +277,7 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // syncTableFocus ensures the PR table focus matches the current panel state.
 func (m *Model) syncTableFocus() {
-	if m.focusedPanel == 1 {
+	if m.focusedPanel == 0 {
 		m.prTable.Focus()
 	} else {
 		m.prTable.Blur()
@@ -331,7 +285,7 @@ func (m *Model) syncTableFocus() {
 }
 
 func (m *Model) maxPanel() int {
-	return 2 // sidebar, table, detail
+	return 1 // table, detail
 }
 
 func (m *Model) focusNext() {
@@ -344,6 +298,16 @@ func (m *Model) focusPrev() {
 	max := m.maxPanel()
 	m.focusedPanel = (m.focusedPanel + max) % (max + 1)
 	m.syncTableFocus()
+}
+
+func (m *Model) cycleRepo(dir int) {
+	n := len(m.reposWithPRs)
+	if n == 0 {
+		return
+	}
+	m.selectedRepoIdx = (m.selectedRepoIdx + dir + n) % n
+	m.rebuildPRTable()
+	m.updateDetailView()
 }
 
 func (m *Model) setFlash(text string, isError bool) {

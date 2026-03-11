@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -83,26 +82,6 @@ func init() {
 	ShortcutKey = lipgloss.NewStyle().Foreground(SecondAccent).Bold(true)
 }
 
-// HuhTheme returns a huh form theme using the btop theme colors.
-func HuhTheme(isDark bool) *huh.Styles {
-	t := huh.ThemeBase(isDark)
-
-	t.Focused.Base = t.Focused.Base.BorderForeground(Border)
-	t.Focused.Title = t.Focused.Title.Foreground(Accent).Bold(true)
-	t.Focused.Description = Dim
-	t.Focused.FocusedButton = lipgloss.NewStyle().
-		Padding(0, 2).MarginRight(1).
-		Foreground(SelectedFG).Background(Accent).Bold(true)
-	t.Focused.BlurredButton = lipgloss.NewStyle().
-		Padding(0, 2).MarginRight(1).
-		Foreground(Text).Background(SelectedBG)
-
-	t.Blurred = t.Focused
-	t.Blurred.Base = t.Blurred.Base.BorderStyle(lipgloss.HiddenBorder())
-
-	return t
-}
-
 // PanelBorder returns the border style for a panel.
 func PanelBorder(focused bool) lipgloss.Style {
 	if focused {
@@ -119,8 +98,45 @@ func PanelTitle(title string, focused bool) string {
 	return Dim.Render(title)
 }
 
+// PRStatusDot returns a colored dot indicating PR merge readiness.
+func PRStatusDot(checksPass, mergeable bool) string {
+	switch {
+	case checksPass && mergeable:
+		return SuccessText.Render("●")
+	case !checksPass:
+		return ErrorText.Render("●")
+	default: // !mergeable
+		return WarningText.Render("●")
+	}
+}
+
+// PRTypeStyle returns a styled update type string.
+func PRTypeStyle(updateType string) string {
+	switch updateType {
+	case "major":
+		return ErrorText.Render(updateType)
+	case "minor":
+		return WarningText.Render(updateType)
+	default:
+		return Dim.Render(updateType)
+	}
+}
+
+// JobStatusDot returns a colored dot for job status.
+func JobStatusDot(status string) string {
+	switch status {
+	case "success":
+		return SuccessText.Render("●")
+	case "failed":
+		return ErrorText.Render("●")
+	case "running":
+		return WarningText.Render("◌")
+	default: // pending, queued
+		return Dim.Render("○")
+	}
+}
+
 // PRAgeForeground returns a color based on PR age.
-// Fresh = green, aging = yellow, stale = red.
 func PRAgeForeground(created time.Time) color.Color {
 	d := time.Since(created)
 	switch {

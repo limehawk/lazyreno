@@ -7,6 +7,8 @@ type KeyMap struct {
 	Help      key.Binding
 	Refresh   key.Binding
 	Repos     key.Binding // toggle repos overlay
+	NextRepo  key.Binding
+	PrevRepo  key.Binding
 	FocusNext key.Binding
 	FocusPrev key.Binding
 	Up        key.Binding
@@ -31,7 +33,7 @@ type KeyMap struct {
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Purge, k.Repos, k.Help}
+	return []key.Binding{k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Purge, k.PrevRepo, k.NextRepo, k.Help}
 }
 
 func (k KeyMap) FullHelp() [][]key.Binding {
@@ -39,7 +41,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown},
 		{k.FocusNext, k.FocusPrev, k.Enter, k.Filter, k.Escape},
 		{k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Purge},
-		{k.Repos, k.Refresh, k.Help, k.Quit},
+		{k.PrevRepo, k.NextRepo, k.Repos, k.Refresh, k.Help, k.Quit},
 	}
 }
 
@@ -47,7 +49,9 @@ var GlobalKeys = KeyMap{
 	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	Help:      key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Refresh:   key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
-	Repos:     key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "repos")),
+	Repos:     key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "all repos")),
+	NextRepo:  key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next repo")),
+	PrevRepo:  key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev repo")),
 	FocusNext: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
 	FocusPrev: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "prev panel")),
 	Up:        key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k", "up")),
@@ -62,9 +66,9 @@ var GlobalKeys = KeyMap{
 	HalfDown:  key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("C-d", "half page down")),
 	HalfUp:    key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("C-u", "half page up")),
 
-	Merge:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge PR")),
+	Merge:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge")),
 	MergeSafe: key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "safe merge")),
-	Close:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "close PR")),
+	Close:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "close")),
 	Open:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "browser")),
 	Sync:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync")),
 	Purge:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "purge")),

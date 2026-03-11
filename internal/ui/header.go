@@ -2,10 +2,13 @@ package ui
 
 import "charm.land/lipgloss/v2"
 
-func RenderStatusBar(spinnerView string, lastUpdated string, width int) string {
+func RenderStatusBar(spinnerView string, repoInfo string, lastUpdated string, width int) string {
 	left := Bold.Render("lazyreno")
 	if spinnerView != "" {
 		left += " " + spinnerView
+	}
+	if repoInfo != "" {
+		left += "  " + repoInfo
 	}
 	right := Dim.Render(lastUpdated)
 
