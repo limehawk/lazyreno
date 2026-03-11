@@ -269,7 +269,14 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showConfirm(fmt.Sprintf("Merge #%d into %s? [y/n]", pr.Number, pr.Base), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
-				err := m.github.MergePR(owner, repo, pr.Number)
+				mergeable, _, err := m.github.GetPRMergeability(owner, repo, pr.Number)
+				if err != nil {
+					return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("mergeability check failed: %w", err)}
+				}
+				if !mergeable {
+					return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("PR #%d is not mergeable", pr.Number)}
+				}
+				err = m.github.MergePR(owner, repo, pr.Number)
 				return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
 		})
@@ -287,7 +294,14 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				pr := pr
 				cmds = append(cmds, func() tea.Msg {
 					owner, repo := splitRepo(pr.Repo)
-					err := m.github.MergePR(owner, repo, pr.Number)
+					mergeable, _, err := m.github.GetPRMergeability(owner, repo, pr.Number)
+					if err != nil {
+						return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("check failed: %w", err)}
+					}
+					if !mergeable {
+						return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("PR #%d not mergeable", pr.Number)}
+					}
+					err = m.github.MergePR(owner, repo, pr.Number)
 					return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 				})
 			}
