@@ -28,39 +28,39 @@ type Model struct {
 
 	// Shared data
 	repos          []string
-	reposWithPRs   []string // short names of repos that have open PRs
 	prs            []backend.PR
 	pendingPRs     []backend.PR
 	pendingPRCount int
+	prBatchQueue   [][]string // remaining batches to fetch
 	status         *backend.SystemStatus
 	jobs           []backend.Job
-
-	// Selected repo (cycles with [ / ])
-	selectedRepoIdx int
 
 	// Filtered PRs for the currently selected repo.
 	filteredPRs []backend.PR
 
 	// UI state
-	keys           KeyMap
-	help           help.Model
-	spinner        spinner.Model
-	lastUpdate     time.Time
-	showRepos      bool // overlay toggle
-	confirmText    string
-	confirmAction  func() tea.Cmd
-	flashText      string
-	flashIsError   bool
-	flashExpiry    time.Time
-	focusedPanel   int // 0=table, 1=detail
+	keys          KeyMap
+	help          help.Model
+	spinner       spinner.Model
+	lastUpdate    time.Time
+	showRepos     bool // overlay toggle
+	confirmText   string
+	confirmAction func() tea.Cmd
+	flashText     string
+	flashIsError  bool
+	flashExpiry   time.Time
+	focusedPanel  int // 0=sidebar, 1=table, 2=detail
+
+	// Sidebar: repos with open PRs
+	repoList list.Model
 
 	// All repos overlay
 	allRepoList list.Model
 
-	// PR table (full width)
+	// PR table (right column, top)
 	prTable table.Model
 
-	// Detail viewport (bottom-left bento panel)
+	// Detail viewport (right column, bottom-left bento panel)
 	detailView viewport.Model
 
 	err error
@@ -98,10 +98,9 @@ func newSidebarList(title string) list.Model {
 	return l
 }
 
-// newPRTable creates the table for the PR list.
 func newPRTable() table.Model {
 	cols := []table.Column{
-		{Title: "", Width: 1},
+		{Title: "", Width: 3},
 		{Title: "Title", Width: 40},
 		{Title: "Type", Width: 7},
 		{Title: "Age", Width: 8},
@@ -109,12 +108,11 @@ func newPRTable() table.Model {
 
 	return table.New(
 		table.WithColumns(cols),
-		table.WithFocused(true),
+		table.WithFocused(false),
 		table.WithStyles(prTableStyles()),
 	)
 }
 
-// prTableStyles builds table.Styles from theme colors.
 func prTableStyles() table.Styles {
 	return table.Styles{
 		Header: lipgloss.NewStyle().
@@ -128,9 +126,7 @@ func prTableStyles() table.Styles {
 			Padding(0, 1),
 		Selected: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ui.SelectedFG).
-			Background(ui.SelectedBG).
-			Padding(0, 1),
+			Foreground(ui.Accent),
 	}
 }
 
@@ -165,6 +161,7 @@ func NewModel(cfg *config.Config) Model {
 		keys:        GlobalKeys,
 		help:        h,
 		spinner:     sp,
+		repoList:    newSidebarList("Repos"),
 		allRepoList: newSidebarList("Repos"),
 		prTable:     newPRTable(),
 		detailView:  viewport.New(),
@@ -181,25 +178,6 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// selectedRepo returns the short name of the currently selected repo, or "".
-func (m Model) selectedRepo() string {
-	if len(m.reposWithPRs) == 0 {
-		return ""
-	}
-	if m.selectedRepoIdx >= len(m.reposWithPRs) {
-		return m.reposWithPRs[0]
-	}
-	return m.reposWithPRs[m.selectedRepoIdx]
-}
-
-func (m Model) selectedRepoFull() string {
-	repo := m.selectedRepo()
-	if repo == "" {
-		return ""
-	}
-	return m.cfg.GitHub.Owner + "/" + repo
-}
-
 func (m Model) getSelectedPR() *backend.PR {
 	idx := m.prTable.Cursor()
 	if idx < 0 || idx >= len(m.filteredPRs) {
@@ -210,10 +188,16 @@ func (m Model) getSelectedPR() *backend.PR {
 }
 
 func (m Model) getSafePRsForSelectedRepo() []backend.PR {
-	fullName := m.selectedRepoFull()
-	if fullName == "" {
+	sel := m.repoList.SelectedItem()
+	if sel == nil {
 		return nil
 	}
+	ri, ok := sel.(RepoItem)
+	if !ok {
+		return nil
+	}
+	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
+
 	var safe []backend.PR
 	for _, pr := range m.prs {
 		if pr.Repo == fullName && backend.IsSafeToMerge(pr) {
@@ -257,21 +241,38 @@ func removePR(prs []backend.PR, repo string, number int) []backend.PR {
 	return result
 }
 
-func (m *Model) rebuildRepoList() {
+func (m *Model) rebuildRepoList() tea.Cmd {
+	prevIdx := m.repoList.Index()
 	prsByRepo := m.groupPRsByRepo()
-	m.reposWithPRs = m.getReposWithPRs(prsByRepo)
-	if m.selectedRepoIdx >= len(m.reposWithPRs) && len(m.reposWithPRs) > 0 {
-		m.selectedRepoIdx = len(m.reposWithPRs) - 1
+	repoOrder := m.getReposWithPRs(prsByRepo)
+
+	items := make([]list.Item, len(repoOrder))
+	for i, repo := range repoOrder {
+		fullName := m.cfg.GitHub.Owner + "/" + repo
+		items[i] = RepoItem{Name: repo, PRCount: len(prsByRepo[fullName])}
 	}
+	m.repoList.Title = fmt.Sprintf("Repos (%d)", len(items))
+	cmd := m.repoList.SetItems(items)
+	if prevIdx < len(items) {
+		m.repoList.Select(prevIdx)
+	}
+	return cmd
 }
 
 func (m *Model) rebuildPRTable() {
-	fullName := m.selectedRepoFull()
-	if fullName == "" {
+	sel := m.repoList.SelectedItem()
+	if sel == nil {
 		m.filteredPRs = nil
 		m.prTable.SetRows(nil)
 		return
 	}
+	ri, ok := sel.(RepoItem)
+	if !ok {
+		m.filteredPRs = nil
+		m.prTable.SetRows(nil)
+		return
+	}
+	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
 
 	prevCursor := m.prTable.Cursor()
 	m.filteredPRs = nil
@@ -281,18 +282,18 @@ func (m *Model) rebuildPRTable() {
 		}
 	}
 
-	rows := make([]table.Row, len(m.filteredPRs))
-	for i, pr := range m.filteredPRs {
-		rows[i] = prToRow(pr)
-	}
-	m.prTable.SetRows(rows)
-	if prevCursor < len(rows) {
+	if prevCursor < len(m.filteredPRs) {
 		m.prTable.SetCursor(prevCursor)
 	}
+	m.stampPRTableCursor()
 }
 
-func prToRow(pr backend.PR) table.Row {
+func prToRow(pr backend.PR, selected bool) table.Row {
 	dot := ui.PRStatusDot(pr.ChecksPass, pr.Mergeable)
+	indicator := "  " + dot
+	if selected {
+		indicator = ui.AccentText.Render("▸") + " " + dot
+	}
 
 	title := pr.Title
 	if backend.IsSafeToMerge(pr) {
@@ -309,7 +310,16 @@ func prToRow(pr backend.PR) table.Row {
 	ageStyle := lipgloss.NewStyle().Foreground(ui.PRAgeForeground(pr.CreatedAt))
 	age = ageStyle.Render(age)
 
-	return table.Row{dot, title, updateType, age}
+	return table.Row{indicator, title, updateType, age}
+}
+
+func (m *Model) stampPRTableCursor() {
+	cursor := m.prTable.Cursor()
+	rows := make([]table.Row, len(m.filteredPRs))
+	for i, pr := range m.filteredPRs {
+		rows[i] = prToRow(pr, i == cursor)
+	}
+	m.prTable.SetRows(rows)
 }
 
 func (m *Model) rebuildAllRepoList() tea.Cmd {
@@ -318,7 +328,7 @@ func (m *Model) rebuildAllRepoList() tea.Cmd {
 	for i, repo := range m.repos {
 		items[i] = AllRepoItem{Name: repo}
 	}
-	m.allRepoList.Title = fmt.Sprintf("Repos (%d)", len(items))
+	m.allRepoList.Title = fmt.Sprintf("All Repos (%d)", len(items))
 	cmd := m.allRepoList.SetItems(items)
 	if prevIdx < len(items) {
 		m.allRepoList.Select(prevIdx)
@@ -387,7 +397,6 @@ func (m Model) renderJobsPanel() string {
 		lines = append(lines, fmt.Sprintf("%s %s  %s", dot, repo, ui.Dim.Render(job.Status)))
 	}
 
-	// Append last-finished job if not already in queue.
 	if m.status != nil && m.status.LastFinished != nil {
 		lf := m.status.LastFinished
 		found := false
@@ -411,66 +420,46 @@ func (m Model) renderJobsPanel() string {
 	return strings.Join(lines, "\n")
 }
 
-// repoInfo returns a styled string for the status bar: "▸ repo-name (N)"
-func (m Model) repoInfo() string {
-	repo := m.selectedRepo()
-	if repo == "" {
-		if len(m.repos) == 0 {
-			return ""
-		}
-		return ui.Dim.Render("no PRs")
-	}
-
-	prCount := 0
-	fullName := m.selectedRepoFull()
-	for _, pr := range m.prs {
-		if pr.Repo == fullName {
-			prCount++
-		}
-	}
-
-	return fmt.Sprintf("%s %s %s",
-		ui.AccentText.Render("▸"),
-		ui.Bold.Render(repo),
-		ui.Dim.Render(fmt.Sprintf("(%d)", prCount)),
-	)
-}
-
 func (m *Model) resizeLists() {
 	bodyHeight := m.bodyHeight()
 	if bodyHeight < 1 {
 		return
 	}
 
-	// Table takes top ~60%, bento takes bottom ~40%
+	sidebarW, rightW := m.panelWidths()
+
+	// Sidebar: full height
+	sidebarInnerW, sidebarInnerH := ui.InnerSize(sidebarW, bodyHeight)
+	m.repoList.SetSize(sidebarInnerW, sidebarInnerH)
+
+	// Right column: table top ~60%, bento bottom ~40%
 	tableH := bodyHeight * 60 / 100
 	bentoH := bodyHeight - tableH
 
-	// Table is full width
-	tableInnerW, tableInnerH := ui.InnerSize(m.width, tableH)
+	tableInnerW, tableInnerH := ui.InnerSize(rightW, tableH)
 	m.prTable.SetWidth(tableInnerW)
 	m.prTable.SetHeight(tableInnerH)
 	m.updatePRTableColumns(tableInnerW)
 
 	// Detail viewport in bottom-left bento panel
-	detailW, _, _ := m.bentoPanelWidths()
+	detailW, _, _ := m.bentoPanelWidths(rightW)
 	detailInnerW, detailInnerH := ui.InnerSize(detailW, bentoH)
 	m.detailView.SetWidth(detailInnerW)
-	m.detailView.SetHeight(detailInnerH - 1) // -1 for title
+	m.detailView.SetHeight(detailInnerH - 1)
 
 	// Repos overlay
 	m.allRepoList.SetSize(m.width-4, bodyHeight-4)
 }
 
 func (m *Model) updatePRTableColumns(innerW int) {
-	fixedWidth := 1 + 7 + 8 + 8 // dot(1) + type(7) + age(8) + padding(8)
+	fixedWidth := 3 + 7 + 8 + 8
 	titleWidth := innerW - fixedWidth
 	if titleWidth < 15 {
 		titleWidth = 15
 	}
 
 	m.prTable.SetColumns([]table.Column{
-		{Title: "", Width: 1},
+		{Title: "", Width: 3},
 		{Title: "Title", Width: titleWidth},
 		{Title: "Type", Width: 7},
 		{Title: "Age", Width: 8},
@@ -478,7 +467,7 @@ func (m *Model) updatePRTableColumns(innerW int) {
 }
 
 func (m Model) bodyHeight() int {
-	header := ui.RenderStatusBar("", "", "", m.width)
+	header := ui.RenderStatusBar("", "", m.width)
 	helpBar := m.help.View(m.keys)
 
 	var bottomLines []string
@@ -495,19 +484,37 @@ func (m Model) bodyHeight() int {
 	return h
 }
 
-func (m Model) bentoPanelWidths() (detail, system, jobs int) {
+func (m Model) panelWidths() (sidebar, right int) {
 	w := m.width
-	detail = w * 45 / 100
-	system = w * 22 / 100
-	jobs = w - detail - system
+	switch {
+	case w >= 160:
+		sidebar = 28
+	case w >= 120:
+		sidebar = 24
+	case w >= 80:
+		sidebar = 22
+	default:
+		sidebar = 20
+	}
+	right = w - sidebar
+	if right < 40 {
+		right = 40
+	}
+	return
+}
+
+func (m Model) bentoPanelWidths(rightW int) (detail, system, jobs int) {
+	detail = rightW * 45 / 100
+	system = rightW * 22 / 100
+	jobs = rightW - detail - system
 	if detail < 20 {
 		detail = 20
 	}
-	if system < 15 {
-		system = 15
+	if system < 14 {
+		system = 14
 	}
-	if jobs < 15 {
-		jobs = 15
+	if jobs < 14 {
+		jobs = 14
 	}
 	return
 }

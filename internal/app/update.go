@@ -65,12 +65,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, GlobalKeys.Repos):
 			m.showRepos = !m.showRepos
 			return m, nil
-		case key.Matches(msg, GlobalKeys.NextRepo):
-			m.cycleRepo(1)
-			return m, nil
-		case key.Matches(msg, GlobalKeys.PrevRepo):
-			m.cycleRepo(-1)
-			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusNext):
 			m.focusNext()
 			return m, nil
@@ -110,9 +104,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.repos = msg.Repos
 			m.pendingPRs = nil
-			m.pendingPRCount = len(msg.Repos)
+			batches := makeBatches(msg.Repos, maxConcurrentFetches)
+			if len(batches) == 0 {
+				m.pendingPRCount = 0
+			} else {
+				m.pendingPRCount = len(batches[0])
+				m.prBatchQueue = batches[1:]
+			}
 			cmd1 := m.rebuildAllRepoList()
-			return m, tea.Batch(cmd1, m.fetchAllPRs())
+			if len(batches) > 0 {
+				return m, tea.Batch(cmd1, m.fetchPRBatch(batches[0]))
+			}
+			return m, cmd1
 		}
 	case PRsFetchedMsg:
 		if msg.Err != nil {
@@ -121,14 +124,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.pendingPRs = append(m.pendingPRs, msg.PRs...)
 			m.pendingPRCount--
-			if m.pendingPRCount <= 0 {
-				m.prs = m.pendingPRs
-				m.pendingPRs = nil
-				m.lastUpdate = time.Now()
-				m.rebuildRepoList()
-				m.rebuildPRTable()
-				m.updateDetailView()
+		}
+		if m.pendingPRCount <= 0 {
+			if len(m.prBatchQueue) > 0 {
+				next := m.prBatchQueue[0]
+				m.prBatchQueue = m.prBatchQueue[1:]
+				m.pendingPRCount = len(next)
+				return m, m.fetchPRBatch(next)
 			}
+			m.prs = m.pendingPRs
+			m.pendingPRs = nil
+			m.lastUpdate = time.Now()
+			cmd1 := m.rebuildRepoList()
+			m.rebuildPRTable()
+			m.updateDetailView()
+			return m, cmd1
 		}
 	case SystemStatusFetchedMsg:
 		if msg.Err != nil {
@@ -148,9 +158,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Merged #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
-			m.rebuildRepoList()
+			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
+			return m, cmd1
 		}
 	case ClosePRResultMsg:
 		if msg.Err != nil {
@@ -158,9 +169,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Closed #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
-			m.rebuildRepoList()
+			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
+			return m, cmd1
 		}
 	case SyncTriggeredMsg:
 		if msg.Err != nil {
@@ -194,19 +206,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) updateFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
+	// Arrow keys for panel navigation.
+	if key.Matches(msg, GlobalKeys.Right) {
+		if m.focusedPanel < m.maxPanel() {
+			m.focusNext()
+		}
+		return m, nil
+	}
+	if key.Matches(msg, GlobalKeys.Left) {
+		if m.focusedPanel > 0 {
+			m.focusPrev()
+		}
+		return m, nil
+	}
+
 	switch m.focusedPanel {
-	case 0: // PR table
-		// PR-specific actions.
+	case 0: // sidebar
+		if key.Matches(msg, GlobalKeys.Enter) {
+			m.focusNext()
+			return m, nil
+		}
+		prevIdx := m.repoList.Index()
+		m.repoList, cmd = m.repoList.Update(msg)
+		if m.repoList.Index() != prevIdx {
+			m.rebuildPRTable()
+			m.updateDetailView()
+		}
+		return m, cmd
+	case 1: // PR table
 		if key.Matches(msg, key.NewBinding(key.WithKeys("m", "M", "c", "o", "enter"))) {
 			return m.handlePRActions(msg)
 		}
 		prevCursor := m.prTable.Cursor()
 		m.prTable, cmd = m.prTable.Update(msg)
 		if m.prTable.Cursor() != prevCursor {
+			m.stampPRTableCursor()
 			m.updateDetailView()
 		}
 		return m, cmd
-	case 1: // detail viewport
+	case 2: // detail viewport
 		m.detailView, cmd = m.detailView.Update(msg)
 		return m, cmd
 	}
@@ -277,7 +315,7 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // syncTableFocus ensures the PR table focus matches the current panel state.
 func (m *Model) syncTableFocus() {
-	if m.focusedPanel == 0 {
+	if m.focusedPanel == 1 {
 		m.prTable.Focus()
 	} else {
 		m.prTable.Blur()
@@ -285,7 +323,7 @@ func (m *Model) syncTableFocus() {
 }
 
 func (m *Model) maxPanel() int {
-	return 1 // table, detail
+	return 2 // sidebar, table, detail
 }
 
 func (m *Model) focusNext() {
@@ -298,16 +336,6 @@ func (m *Model) focusPrev() {
 	max := m.maxPanel()
 	m.focusedPanel = (m.focusedPanel + max) % (max + 1)
 	m.syncTableFocus()
-}
-
-func (m *Model) cycleRepo(dir int) {
-	n := len(m.reposWithPRs)
-	if n == 0 {
-		return
-	}
-	m.selectedRepoIdx = (m.selectedRepoIdx + dir + n) % n
-	m.rebuildPRTable()
-	m.updateDetailView()
 }
 
 func (m *Model) setFlash(text string, isError bool) {
@@ -327,13 +355,23 @@ func (m Model) fetchRepos() tea.Cmd {
 	}
 }
 
-func (m Model) fetchAllPRs() tea.Cmd {
-	if m.github == nil || m.cfg.GitHub.Owner == "" {
-		return nil
-	}
+const maxConcurrentFetches = 5
 
+func makeBatches(repos []string, size int) [][]string {
+	var batches [][]string
+	for i := 0; i < len(repos); i += size {
+		end := i + size
+		if end > len(repos) {
+			end = len(repos)
+		}
+		batches = append(batches, repos[i:end])
+	}
+	return batches
+}
+
+func (m Model) fetchPRBatch(repos []string) tea.Cmd {
 	var cmds []tea.Cmd
-	for _, repo := range m.repos {
+	for _, repo := range repos {
 		repo := repo
 		cmds = append(cmds, func() tea.Msg {
 			prs, err := m.github.ListOpenPRs(m.cfg.GitHub.Owner, repo)
