@@ -27,6 +27,7 @@ type Model struct {
 	// Shared data
 	repos          []string
 	prs            []backend.PR
+	prsByRepo      map[string][]backend.PR // indexed on PR fetch completion
 	pendingPRs     []backend.PR
 	pendingPRCount int
 	prBatchQueue   [][]string // remaining batches to fetch
@@ -48,6 +49,13 @@ type Model struct {
 	flashIsError  bool
 	flashExpiry   time.Time
 	focusedPanel  int // 0=sidebar, 1=table, 2=detail
+
+	// Cached layout (recalculated on WindowSizeMsg and help toggle)
+	cachedSidebarW int
+	cachedRightW   int
+	cachedDetailW  int
+	cachedSystemW  int
+	cachedJobsW    int
 
 	// Sidebar: repos with open PRs
 	repoList list.Model
@@ -196,8 +204,8 @@ func (m Model) getSafePRsForSelectedRepo() []backend.PR {
 	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
 
 	var safe []backend.PR
-	for _, pr := range m.prs {
-		if pr.Repo == fullName && backend.IsSafeToMerge(pr) {
+	for _, pr := range m.prsByRepo[fullName] {
+		if backend.IsSafeToMerge(pr) {
 			safe = append(safe, pr)
 		}
 	}
@@ -272,12 +280,7 @@ func (m *Model) rebuildPRTable() {
 	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
 
 	prevCursor := m.prTable.Cursor()
-	m.filteredPRs = nil
-	for _, pr := range m.prs {
-		if pr.Repo == fullName {
-			m.filteredPRs = append(m.filteredPRs, pr)
-		}
-	}
+	m.filteredPRs = m.prsByRepo[fullName]
 
 	if prevCursor < len(m.filteredPRs) {
 		m.prTable.SetCursor(prevCursor)
@@ -498,6 +501,11 @@ func (m Model) panelWidths() (sidebar, right int) {
 		right = 40
 	}
 	return
+}
+
+func (m *Model) recalcLayout() {
+	m.cachedSidebarW, m.cachedRightW = m.panelWidths()
+	m.cachedDetailW, m.cachedSystemW, m.cachedJobsW = m.bentoPanelWidths(m.cachedRightW)
 }
 
 func (m Model) bentoPanelWidths(rightW int) (detail, system, jobs int) {

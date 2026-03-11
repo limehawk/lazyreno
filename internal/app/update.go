@@ -17,6 +17,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.help.SetWidth(msg.Width)
 		m.resizeLists()
+		m.recalcLayout()
 		m.syncTableFocus()
 		return m, nil
 
@@ -61,6 +62,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, GlobalKeys.Help):
 			m.help.ShowAll = !m.help.ShowAll
 			m.resizeLists()
+			m.recalcLayout()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Repos):
 			m.showRepos = !m.showRepos
@@ -134,6 +136,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.prs = m.pendingPRs
 			m.pendingPRs = nil
+			m.prsByRepo = m.groupPRsByRepo()
 			m.lastUpdate = time.Now()
 			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
@@ -158,6 +161,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Merged #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
+			m.prsByRepo = m.groupPRsByRepo()
 			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
@@ -169,6 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Closed #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
+			m.prsByRepo = m.groupPRsByRepo()
 			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
