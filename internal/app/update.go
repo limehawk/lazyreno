@@ -59,6 +59,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, GlobalKeys.Help):
 			m.help.ShowAll = !m.help.ShowAll
+			m.resizeLists()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Tab1):
 			m.activeTab = TabPRs

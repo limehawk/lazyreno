@@ -38,7 +38,7 @@ type KeyMap struct {
 
 // ShortHelp returns bindings for the compact one-line help bar.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Quit, k.Refresh, k.Up, k.Down, k.FocusNext, k.NextTab}
+	return []key.Binding{k.Merge, k.MergeSafe, k.Close, k.Open, k.FocusNext, k.Refresh, k.Help}
 }
 
 // FullHelp returns the extended help grouped by columns.
