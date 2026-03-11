@@ -21,8 +21,6 @@ type Model struct {
 	cfg      *config.Config
 	renovate *backend.RenovateClient
 	github   *backend.GitHubClient
-	cache    *backend.Cache
-
 	width  int
 	height int
 
@@ -157,7 +155,6 @@ func NewModel(cfg *config.Config) Model {
 		cfg:         cfg,
 		renovate:    renovate,
 		github:      gh,
-		cache:       backend.NewCache(30 * time.Second),
 		keys:        GlobalKeys,
 		help:        h,
 		spinner:     sp,

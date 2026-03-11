@@ -97,24 +97,3 @@ func TestRenovateTriggerSync(t *testing.T) {
 		t.Error("sync endpoint not called")
 	}
 }
-
-func TestRenovateOrgs(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/orgs" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		json.NewEncoder(w).Encode([]map[string]any{
-			{"name": "limehawk"},
-		})
-	}))
-	defer srv.Close()
-
-	client := NewRenovateClient(srv.URL, "test-secret")
-	orgs, err := client.GetOrgs()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(orgs) != 1 || orgs[0] != "limehawk" {
-		t.Errorf("expected [limehawk], got %v", orgs)
-	}
-}

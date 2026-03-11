@@ -3,8 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"strings"
+"strings"
 	"time"
 
 	"github.com/google/go-github/v84/github"
@@ -191,10 +190,4 @@ func RelativeTime(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
-}
-
-// OpenInBrowser opens a URL in the default browser.
-func OpenInBrowser(url string) *http.Request {
-	// This is a placeholder — the actual browser opening is handled by the TUI.
-	return nil
 }

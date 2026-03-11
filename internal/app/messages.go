@@ -47,8 +47,3 @@ type JobQueueFetchedMsg struct {
 // Timer tick for background polling.
 type TickMsg struct{}
 
-// Flash message for status bar.
-type FlashMsg struct {
-	Text    string
-	IsError bool
-}
