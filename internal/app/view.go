@@ -25,15 +25,15 @@ func (m Model) View() tea.View {
 		return view(m.viewReposOverlay())
 	}
 
-	// Status bar: lazyreno ⣾  ▸ repo-name (3)             updated 12s ago
+	// Status bar
 	updatedAgo := ""
 	if !m.lastUpdate.IsZero() {
 		d := time.Since(m.lastUpdate).Truncate(time.Second)
 		updatedAgo = "updated " + d.String() + " ago"
 	}
-	header := ui.RenderStatusBar(m.spinner.View(), m.repoInfo(), updatedAgo, m.width)
+	header := ui.RenderStatusBar(m.spinner.View(), updatedAgo, m.width)
 
-	// Bottom bar: either confirm prompt or help
+	// Bottom bar: confirm prompt or help
 	var bottom string
 	if m.confirmText != "" {
 		bottom = ui.WarningText.Render(m.confirmText)
@@ -62,22 +62,29 @@ func (m Model) View() tea.View {
 }
 
 func (m Model) viewDashboard(height int) string {
-	// Table takes top ~60%, bento grid takes bottom ~40%
+	sidebarW, rightW := m.cachedSidebarW, m.cachedRightW
+
+	// Left: sidebar (full height)
+	sidebar := ui.WrapListInPanel(
+		m.repoList.View(),
+		m.focusedPanel == 0, sidebarW, height,
+	)
+
+	// Right: table top ~60%, bento bottom ~40%
 	tableH := height * 60 / 100
 	bentoH := height - tableH
 
-	// Full-width PR table
 	tablePanel := ui.RenderPanel(
 		"", m.prTable.View(),
-		m.focusedPanel == 0, m.width, tableH,
+		m.focusedPanel == 1, rightW, tableH,
 	)
 
 	// Bottom bento: Detail | System | Jobs
-	detailW, systemW, jobsW := m.bentoPanelWidths()
+	detailW, systemW, jobsW := m.cachedDetailW, m.cachedSystemW, m.cachedJobsW
 
 	detailPanel := ui.RenderPanel(
 		"Details", m.detailView.View(),
-		m.focusedPanel == 1, detailW, bentoH,
+		m.focusedPanel == 2, detailW, bentoH,
 	)
 
 	systemContent := m.renderStatusBox()
@@ -100,8 +107,9 @@ func (m Model) viewDashboard(height int) string {
 	)
 
 	bentoRow := lipgloss.JoinHorizontal(lipgloss.Top, detailPanel, systemPanel, jobsPanel)
+	rightCol := lipgloss.JoinVertical(lipgloss.Left, tablePanel, bentoRow)
 
-	return lipgloss.JoinVertical(lipgloss.Left, tablePanel, bentoRow)
+	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, rightCol)
 }
 
 func (m Model) viewReposOverlay() string {
