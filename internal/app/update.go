@@ -90,27 +90,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPanel = 0
 			m.syncTableFocus()
 			return m, nil
-		case key.Matches(msg, GlobalKeys.FocusNext), key.Matches(msg, GlobalKeys.Right):
-			maxPanel := 2
-			if m.activeTab != TabPRs {
-				maxPanel = 1
-			}
-			if m.activeTab == TabStatus {
-				maxPanel = 0
-			}
-			m.focusedPanel = (m.focusedPanel + 1) % (maxPanel + 1)
-			m.syncTableFocus()
+		case key.Matches(msg, GlobalKeys.FocusNext):
+			m.focusNext()
 			return m, nil
-		case key.Matches(msg, GlobalKeys.FocusPrev), key.Matches(msg, GlobalKeys.Left):
-			maxPanel := 2
-			if m.activeTab != TabPRs {
-				maxPanel = 1
-			}
-			if m.activeTab == TabStatus {
-				maxPanel = 0
-			}
-			m.focusedPanel = (m.focusedPanel + maxPanel) % (maxPanel + 1)
-			m.syncTableFocus()
+		case key.Matches(msg, GlobalKeys.FocusPrev):
+			m.focusPrev()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Refresh):
 			return m, tea.Batch(m.fetchRepos(), m.fetchStatus(), m.fetchJobQueue())
@@ -213,24 +197,45 @@ func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.activeTab {
 	case TabPRs:
+		// Arrow keys for panel navigation.
+		if key.Matches(msg, GlobalKeys.Right) {
+			if m.focusedPanel < m.maxPanel() {
+				m.focusNext()
+			}
+			return m, nil
+		}
+		if key.Matches(msg, GlobalKeys.Left) {
+			if m.focusedPanel > 0 {
+				m.focusPrev()
+			}
+			return m, nil
+		}
+
 		// Forward keys to the focused component.
 		if m.focusedPanel == 0 {
+			// Enter/right on sidebar selects the repo and moves to PR table.
+			if key.Matches(msg, GlobalKeys.Enter) {
+				m.focusNext()
+				return m, nil
+			}
 			prevIdx := m.repoList.Index()
 			m.repoList, cmd = m.repoList.Update(msg)
 			if m.repoList.Index() != prevIdx {
-				// Sidebar selection changed — rebuild PR table.
 				m.rebuildPRTable()
 				m.updateDetailView()
 			}
 			return m, cmd
 		} else if m.focusedPanel == 1 {
+			// PR-specific actions before the table consumes the key.
+			if key.Matches(msg, key.NewBinding(key.WithKeys("m", "M", "c", "o", "enter"))) {
+				return m.handlePRActions(msg)
+			}
 			prevCursor := m.prTable.Cursor()
 			m.prTable, cmd = m.prTable.Update(msg)
 			if m.prTable.Cursor() != prevCursor {
 				m.updateDetailView()
 			}
-			// Check for PR-specific actions.
-			return m.handlePRActions(msg)
+			return m, cmd
 		} else {
 			// Detail pane: forward to viewport for scrolling.
 			m.detailView, cmd = m.detailView.Update(msg)
@@ -238,26 +243,37 @@ func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case TabRepos:
+		if key.Matches(msg, GlobalKeys.Right) && m.focusedPanel < m.maxPanel() {
+			m.focusNext()
+			return m, nil
+		}
+		if key.Matches(msg, GlobalKeys.Left) && m.focusedPanel > 0 {
+			m.focusPrev()
+			return m, nil
+		}
 		if m.focusedPanel == 0 {
 			m.allRepoList, cmd = m.allRepoList.Update(msg)
 			return m, cmd
 		}
-		// Main panel in Repos tab is just informational, no list.
 		return m, nil
 
 	case TabJobs:
+		if key.Matches(msg, GlobalKeys.Right) && m.focusedPanel < m.maxPanel() {
+			m.focusNext()
+			return m, nil
+		}
+		if key.Matches(msg, GlobalKeys.Left) && m.focusedPanel > 0 {
+			m.focusPrev()
+			return m, nil
+		}
 		if m.focusedPanel == 0 {
 			m.jobList, cmd = m.jobList.Update(msg)
-			// Check for job-specific actions.
 			return m.handleJobActions(msg)
 		}
-		// Main panel in Jobs tab is informational.
 		return m, nil
 
 	case TabStatus:
-		// Status tab: forward to viewport for scrolling.
 		m.statusView, cmd = m.statusView.Update(msg)
-		// Check for status-specific actions.
 		return m.handleStatusActions(msg)
 	}
 
@@ -399,6 +415,28 @@ func (m *Model) syncTableFocus() {
 	} else {
 		m.prTable.Blur()
 	}
+}
+
+func (m *Model) maxPanel() int {
+	if m.activeTab == TabStatus {
+		return 0
+	}
+	if m.activeTab == TabPRs {
+		return 2
+	}
+	return 1
+}
+
+func (m *Model) focusNext() {
+	max := m.maxPanel()
+	m.focusedPanel = (m.focusedPanel + 1) % (max + 1)
+	m.syncTableFocus()
+}
+
+func (m *Model) focusPrev() {
+	max := m.maxPanel()
+	m.focusedPanel = (m.focusedPanel + max) % (max + 1)
+	m.syncTableFocus()
 }
 
 func (m *Model) setFlash(text string, isError bool) {
