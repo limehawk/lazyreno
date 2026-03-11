@@ -71,23 +71,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusedPanel = 0
 			m.syncTableFocus()
 			return m, nil
-		case key.Matches(msg, GlobalKeys.Tab3):
-			m.activeTab = TabJobs
-			m.focusedPanel = 0
-			m.syncTableFocus()
-			return m, nil
-		case key.Matches(msg, GlobalKeys.Tab4):
-			m.activeTab = TabStatus
-			m.focusedPanel = 0
-			m.syncTableFocus()
-			return m, nil
 		case key.Matches(msg, GlobalKeys.NextTab):
-			m.activeTab = (m.activeTab + 1) % 4
+			m.activeTab = (m.activeTab + 1) % tabCount
 			m.focusedPanel = 0
 			m.syncTableFocus()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.PrevTab):
-			m.activeTab = (m.activeTab + 3) % 4
+			m.activeTab = (m.activeTab + tabCount - 1) % tabCount
 			m.focusedPanel = 0
 			m.syncTableFocus()
 			return m, nil
@@ -98,7 +88,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPrev()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Refresh):
-			return m, tea.Batch(m.fetchRepos(), m.fetchStatus(), m.fetchJobQueue())
+			return m, tea.Batch(m.fetchRepos(), m.fetchStatus())
+		}
+
+		// Sync/purge available globally on PRs tab (status box is always visible).
+		if m.activeTab == TabPRs && m.renovate != nil {
+			switch {
+			case key.Matches(msg, GlobalKeys.Sync):
+				return m, func() tea.Msg {
+					err := m.renovate.TriggerSync()
+					return SyncTriggeredMsg{Err: err}
+				}
+			case key.Matches(msg, GlobalKeys.Purge):
+				cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
+					return func() tea.Msg {
+						err := m.renovate.PurgeFailedJobs()
+						return PurgeResultMsg{Err: err}
+					}
+				})
+				return m, cmd
+			}
 		}
 
 		// Delegate to tab-specific + focused-panel handling
@@ -131,22 +140,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, cmd1
 			}
 		}
-	case JobQueueFetchedMsg:
-		if msg.Err != nil {
-			m.setFlash(msg.Err.Error(), true)
-		} else {
-			m.jobs = msg.Jobs
-			cmd := m.rebuildJobList()
-			return m, cmd
-		}
 	case SystemStatusFetchedMsg:
 		if msg.Err != nil {
 			m.setFlash(msg.Err.Error(), true)
 		} else {
 			m.status = msg.Status
-			m.updateStatusView()
-			cmd := m.rebuildJobList()
-			return m, cmd
 		}
 	case MergePRResultMsg:
 		if msg.Err != nil {
@@ -187,7 +185,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			m.fetchRepos(),
 			m.fetchStatus(),
-			m.fetchJobQueue(),
 			m.tickCmd(),
 		)
 	}
@@ -260,24 +257,6 @@ func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case TabJobs:
-		if key.Matches(msg, GlobalKeys.Right) && m.focusedPanel < m.maxPanel() {
-			m.focusNext()
-			return m, nil
-		}
-		if key.Matches(msg, GlobalKeys.Left) && m.focusedPanel > 0 {
-			m.focusPrev()
-			return m, nil
-		}
-		if m.focusedPanel == 0 {
-			m.jobList, cmd = m.jobList.Update(msg)
-			return m.handleJobActions(msg)
-		}
-		return m, nil
-
-	case TabStatus:
-		m.statusView, cmd = m.statusView.Update(msg)
-		return m.handleStatusActions(msg)
 	}
 
 	return m, nil
@@ -355,63 +334,6 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *Model) handleJobActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.renovate == nil {
-		return m, nil
-	}
-
-	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
-		sel := m.jobList.SelectedItem()
-		if sel == nil {
-			return m, nil
-		}
-		ji, ok := sel.(JobItem)
-		if !ok {
-			return m, nil
-		}
-		job := ji.Job
-		return m, func() tea.Msg {
-			err := m.renovate.AddJob(job.Repo)
-			return SyncTriggeredMsg{Err: err}
-		}
-	case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
-		cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
-			return func() tea.Msg {
-				err := m.renovate.PurgeFailedJobs()
-				return PurgeResultMsg{Err: err}
-			}
-		})
-		return m, cmd
-	}
-
-	return m, nil
-}
-
-func (m *Model) handleStatusActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.renovate == nil {
-		return m, nil
-	}
-
-	switch {
-	case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
-		return m, func() tea.Msg {
-			err := m.renovate.TriggerSync()
-			return SyncTriggeredMsg{Err: err}
-		}
-	case key.Matches(msg, key.NewBinding(key.WithKeys("p"))):
-		cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
-			return func() tea.Msg {
-				err := m.renovate.PurgeFailedJobs()
-				return PurgeResultMsg{Err: err}
-			}
-		})
-		return m, cmd
-	}
-
-	return m, nil
-}
-
 // syncTableFocus ensures the PR table focus matches the current panel state.
 func (m *Model) syncTableFocus() {
 	if m.activeTab == TabPRs && m.focusedPanel == 1 {
@@ -422,9 +344,6 @@ func (m *Model) syncTableFocus() {
 }
 
 func (m *Model) maxPanel() int {
-	if m.activeTab == TabStatus {
-		return 0
-	}
 	if m.activeTab == TabPRs {
 		return 2
 	}
@@ -483,16 +402,6 @@ func (m Model) fetchStatus() tea.Cmd {
 		}
 		status, err := m.renovate.GetStatus()
 		return SystemStatusFetchedMsg{Status: status, Err: err}
-	}
-}
-
-func (m Model) fetchJobQueue() tea.Cmd {
-	return func() tea.Msg {
-		if m.renovate == nil {
-			return JobQueueFetchedMsg{Err: nil}
-		}
-		jobs, err := m.renovate.GetJobQueue()
-		return JobQueueFetchedMsg{Jobs: jobs, Err: err}
 	}
 }
 

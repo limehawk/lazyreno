@@ -1,11 +1,6 @@
 package app
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/limehawk/lazyreno/internal/backend"
-)
+import "fmt"
 
 // RepoItem wraps a repo name + PR count for the sidebar list.
 // Used with list.DefaultDelegate (shows Title + optional Description).
@@ -27,16 +22,3 @@ func (i AllRepoItem) FilterValue() string { return i.Name }
 func (i AllRepoItem) Title() string       { return i.Name }
 func (i AllRepoItem) Description() string { return "" }
 
-// JobItem wraps a backend.Job for the jobs list sidebar.
-type JobItem struct {
-	Job backend.Job
-}
-
-func (i JobItem) FilterValue() string { return i.Job.Repo }
-func (i JobItem) Title() string {
-	if parts := strings.SplitN(i.Job.Repo, "/", 2); len(parts) == 2 {
-		return parts[1]
-	}
-	return i.Job.Repo
-}
-func (i JobItem) Description() string { return i.Job.Status }

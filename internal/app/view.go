@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/ui"
 )
 
@@ -56,10 +55,6 @@ func (m Model) View() tea.View {
 		body = m.viewPRs(bodyHeight)
 	case TabRepos:
 		body = m.viewRepos(bodyHeight)
-	case TabJobs:
-		body = m.viewJobs(bodyHeight)
-	case TabStatus:
-		body = m.viewStatus(bodyHeight)
 	}
 
 	return view(lipgloss.JoinVertical(lipgloss.Left, header, body, bottom))
@@ -81,8 +76,21 @@ func (m Model) viewPRs(height int) string {
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
 
 	if detailWidth > 0 {
+		pr := m.getSelectedPR()
+		var detailContent string
+
+		if pr != nil {
+			// PR detail on top, status box on bottom
+			detailContent = m.detailView.View() + "\n\n" +
+				ui.Dim.Render("─── System ───") + "\n" +
+				m.renderStatusBox()
+		} else {
+			// No PR selected — status expands to fill
+			detailContent = m.renderStatusBox()
+		}
+
 		detail := ui.RenderPanel(
-			"Details", m.detailView.View(),
+			"Details", detailContent,
 			m.focusedPanel == 2, detailWidth, height,
 		)
 		panels = lipgloss.JoinHorizontal(lipgloss.Top, panels, detail)
@@ -143,71 +151,4 @@ func (m Model) viewRepos(height int) string {
 	)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
-}
-
-func (m Model) viewJobs(height int) string {
-	sidebarWidth := m.width * 25 / 100
-	if sidebarWidth < 22 {
-		sidebarWidth = 22
-	}
-	if sidebarWidth > 40 {
-		sidebarWidth = 40
-	}
-	mainWidth := m.width - sidebarWidth
-
-	sidebar := ui.WrapListInPanel(
-		m.jobList.View(),
-		m.focusedPanel == 0, sidebarWidth, height,
-	)
-
-	mainContent := ui.Dim.Render("Select a job")
-	sel := m.jobList.SelectedItem()
-	if sel != nil {
-		if ji, ok := sel.(JobItem); ok {
-			job := ji.Job
-
-			statusStyle := ui.SuccessText
-			if job.Status == "failed" {
-				statusStyle = ui.ErrorText
-			} else if job.Status == "running" || job.Status == "pending" {
-				statusStyle = ui.WarningText
-			}
-
-			lines := fmt.Sprintf(
-				"%s  %s\n%s  %s\n%s  %s",
-				ui.Dim.Render("Job:   "), job.ID,
-				ui.Dim.Render("Repo:  "), ui.Bold.Render(job.Repo),
-				ui.Dim.Render("Status:"), statusStyle.Render(job.Status),
-			)
-			if job.Trigger != "" {
-				lines += fmt.Sprintf("\n%s  %s", ui.Dim.Render("Trigger:"), job.Trigger)
-			}
-			if job.StartedAt != nil {
-				lines += fmt.Sprintf("\n%s  %s", ui.Dim.Render("Started:"), backend.RelativeTime(*job.StartedAt))
-			}
-			if job.Duration > 0 {
-				lines += fmt.Sprintf("\n%s  %s", ui.Dim.Render("Duration:"), job.Duration.Truncate(time.Second).String())
-			}
-			lines += fmt.Sprintf("\n\n%s retry  %s purge failed",
-				ui.ShortcutKey.Render("[r]"), ui.ShortcutKey.Render("[p]"))
-			mainContent = lines
-		}
-	}
-
-	main := ui.RenderPanel(
-		"Job Details",
-		mainContent,
-		m.focusedPanel == 1,
-		mainWidth,
-		height,
-	)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
-}
-
-func (m Model) viewStatus(height int) string {
-	return ui.RenderPanel(
-		"System Status", m.statusView.View(),
-		true, m.width, height,
-	)
 }

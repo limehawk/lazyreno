@@ -13,20 +13,9 @@ type ReposFetchedMsg struct {
 	Err   error
 }
 
-type JobQueueFetchedMsg struct {
-	Jobs []backend.Job
-	Err  error
-}
-
 type SystemStatusFetchedMsg struct {
 	Status *backend.SystemStatus
 	Err    error
-}
-
-type JobHistoryFetchedMsg struct {
-	Repo string
-	Jobs []backend.Job
-	Err  error
 }
 
 // Action results

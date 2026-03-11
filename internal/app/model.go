@@ -18,10 +18,9 @@ import (
 )
 
 const (
-	TabPRs    = 0
-	TabRepos  = 1
-	TabJobs   = 2
-	TabStatus = 3
+	TabPRs   = 0
+	TabRepos = 1
+	tabCount = 2
 )
 
 type Model struct {
@@ -39,7 +38,6 @@ type Model struct {
 	prs            []backend.PR
 	pendingPRs     []backend.PR
 	pendingPRCount int // number of PR fetch responses expected
-	jobs           []backend.Job
 	status         *backend.SystemStatus
 
 	// Filtered PRs for the currently selected repo (maps to prTable rows).
@@ -59,14 +57,12 @@ type Model struct {
 	// Sidebar lists (use default delegate)
 	repoList    list.Model // PRs tab sidebar
 	allRepoList list.Model // Repos tab sidebar
-	jobList     list.Model // Jobs tab sidebar
 
 	// PR table (main panel on PRs tab)
 	prTable table.Model
 
-	// Detail / status viewport
+	// Detail viewport
 	detailView viewport.Model
-	statusView viewport.Model
 
 	err error
 }
@@ -167,10 +163,8 @@ func NewModel(cfg *config.Config) Model {
 		help:        h,
 		repoList:    newSidebarList("Repos"),
 		allRepoList: newSidebarList("Repos"),
-		jobList:     newSidebarList("Queue"),
 		prTable:     newPRTable(),
-		detailView:  viewport.New(),
-		statusView:  viewport.New(),
+		detailView: viewport.New(),
 	}
 }
 
@@ -178,7 +172,6 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.fetchRepos(),
 		m.fetchStatus(),
-		m.fetchJobQueue(),
 		m.tickCmd(),
 	)
 }
@@ -329,33 +322,6 @@ func (m *Model) rebuildAllRepoList() tea.Cmd {
 	return cmd
 }
 
-func (m *Model) rebuildJobList() tea.Cmd {
-	prevIdx := m.jobList.Index()
-	var items []list.Item
-	for _, job := range m.jobs {
-		items = append(items, JobItem{Job: job})
-	}
-	// Append last finished job from status if available and not already in queue.
-	if m.status != nil && m.status.LastFinished != nil {
-		lf := m.status.LastFinished
-		alreadyListed := false
-		for _, job := range m.jobs {
-			if job.ID == lf.ID {
-				alreadyListed = true
-				break
-			}
-		}
-		if !alreadyListed {
-			items = append(items, JobItem{Job: *lf})
-		}
-	}
-	m.jobList.Title = fmt.Sprintf("Queue (%d)", len(m.jobs))
-	cmd := m.jobList.SetItems(items)
-	if prevIdx < len(items) {
-		m.jobList.Select(prevIdx)
-	}
-	return cmd
-}
 
 func (m *Model) updateDetailView() {
 	pr := m.getSelectedPR()
@@ -389,44 +355,43 @@ func (m *Model) updateDetailView() {
 	m.detailView.SetContent(content)
 }
 
-func (m *Model) updateStatusView() {
-	var lines []string
-
+func (m Model) renderStatusBox() string {
 	if m.renovate == nil {
-		lines = []string{
-			"",
-			ui.WarningText.Render("  Renovate CE not configured"),
-			"",
-			ui.Dim.Render("  Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET"),
-		}
-	} else if m.status == nil {
-		lines = []string{"", ui.Dim.Render("  Connecting to Renovate CE...")}
-	} else {
-		s := m.status
-		connected := ui.SuccessText.Render("ok connected")
-		uptime := s.Uptime.Truncate(time.Minute).String()
-
-		lines = append(lines, "")
-		lines = append(lines, fmt.Sprintf("  %s %s          %s %s       %s %s",
-			ui.Dim.Render("Renovate CE"), ui.Bold.Render(s.Version),
-			ui.Dim.Render("API:"), connected,
-			ui.Dim.Render("Uptime:"), uptime))
-		lines = append(lines, fmt.Sprintf("  %s %d            %s %d",
-			ui.Dim.Render("Jobs:"), s.QueueSize,
-			ui.Dim.Render("Failed:"), s.FailedJobs))
-		lines = append(lines, "")
-
-		divWidth := m.width - 6
-		if divWidth < 0 {
-			divWidth = 0
-		}
-		lines = append(lines, ui.Dim.Render("  "+strings.Repeat("-", divWidth)))
-		lines = append(lines, "")
-		lines = append(lines, "  "+ui.ShortcutKey.Render("[s]")+" sync now   "+
-			ui.ShortcutKey.Render("[p]")+" purge failed")
+		return ui.WarningText.Render("Renovate CE not configured") + "\n" +
+			ui.Dim.Render("Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET")
+	}
+	if m.status == nil {
+		return ui.Dim.Render("Connecting to Renovate CE...")
 	}
 
-	m.statusView.SetContent(strings.Join(lines, "\n"))
+	s := m.status
+	uptime := s.Uptime.Truncate(time.Minute).String()
+
+	lines := []string{
+		fmt.Sprintf("%s  %s", ui.Dim.Render("System"), ui.Bold.Render("v"+s.Version)),
+		fmt.Sprintf("%s  %s", ui.Dim.Render("Uptime"), uptime),
+		fmt.Sprintf("%s  %d", ui.Dim.Render("Queue "), s.QueueSize),
+	}
+
+	if s.LastFinished != nil {
+		lf := s.LastFinished
+		statusStyle := ui.SuccessText
+		if lf.Status == "failed" {
+			statusStyle = ui.ErrorText
+		}
+		_, repo := splitRepo(lf.Repo)
+		jobLine := fmt.Sprintf("%s  %s", ui.Dim.Render("Last  "), repo)
+		if lf.Duration > 0 {
+			jobLine += fmt.Sprintf("  %s  %s",
+				lf.Duration.Truncate(time.Second).String(),
+				statusStyle.Render(lf.Status))
+		} else {
+			jobLine += "  " + statusStyle.Render(lf.Status)
+		}
+		lines = append(lines, jobLine)
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) resizeLists() {
@@ -442,7 +407,6 @@ func (m *Model) resizeLists() {
 
 	m.repoList.SetSize(sidebarInnerW, sidebarInnerH)
 	m.allRepoList.SetSize(sidebarInnerW, sidebarInnerH)
-	m.jobList.SetSize(sidebarInnerW, sidebarInnerH)
 
 	m.prTable.SetWidth(mainInnerW)
 	m.prTable.SetHeight(mainInnerH)
@@ -454,9 +418,6 @@ func (m *Model) resizeLists() {
 		m.detailView.SetHeight(detailInnerH - 1) // -1 for title line
 	}
 
-	statusInnerW, statusInnerH := ui.InnerSize(m.width, bodyHeight)
-	m.statusView.SetWidth(statusInnerW)
-	m.statusView.SetHeight(statusInnerH - 1) // -1 for title line
 }
 
 func (m *Model) updatePRTableColumns(innerW int) {

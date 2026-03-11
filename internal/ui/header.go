@@ -2,7 +2,7 @@ package ui
 
 import "charm.land/lipgloss/v2"
 
-var tabNames = []string{"PRs", "Repos", "Jobs", "Status"}
+var tabNames = []string{"PRs", "Repos"}
 
 func RenderHeader(activeTab int, width int) string {
 	var tabs []string

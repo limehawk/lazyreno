@@ -8,8 +8,6 @@ type KeyMap struct {
 	Refresh   key.Binding
 	Tab1      key.Binding
 	Tab2      key.Binding
-	Tab3      key.Binding
-	Tab4      key.Binding
 	NextTab   key.Binding
 	PrevTab   key.Binding
 	FocusNext key.Binding
@@ -26,13 +24,12 @@ type KeyMap struct {
 	HalfDown  key.Binding
 	HalfUp    key.Binding
 
-	// Tab-specific bindings (shown in full help only)
+	// Action bindings
 	Merge     key.Binding
 	MergeSafe key.Binding
 	Close     key.Binding
 	Open      key.Binding
 	Sync      key.Binding
-	Retry     key.Binding
 	Purge     key.Binding
 }
 
@@ -45,9 +42,9 @@ func (k KeyMap) ShortHelp() []key.Binding {
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown},
-		{k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.NextTab, k.PrevTab},
+		{k.Tab1, k.Tab2, k.NextTab, k.PrevTab},
 		{k.FocusNext, k.FocusPrev, k.Enter, k.Filter, k.Escape},
-		{k.Merge, k.MergeSafe, k.Close, k.Open},
+		{k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Purge},
 		{k.Refresh, k.Help, k.Quit},
 	}
 }
@@ -63,30 +60,22 @@ func (t TabKeyMap) ShortHelp() []key.Binding {
 	switch t.tab {
 	case TabRepos:
 		return []key.Binding{k.FocusNext, k.Filter, k.Refresh, k.Help}
-	case TabJobs:
-		return []key.Binding{k.Retry, k.Purge, k.FocusNext, k.Refresh, k.Help}
-	case TabStatus:
-		return []key.Binding{k.Sync, k.Purge, k.Refresh, k.Help}
 	default: // TabPRs
-		return []key.Binding{k.Merge, k.MergeSafe, k.Close, k.Open, k.FocusNext, k.Refresh, k.Help}
+		return []key.Binding{k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Purge, k.Help}
 	}
 }
 
 func (t TabKeyMap) FullHelp() [][]key.Binding {
 	k := t.KeyMap
 	nav := []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.HalfUp, k.HalfDown}
-	tabs := []key.Binding{k.Tab1, k.Tab2, k.Tab3, k.Tab4, k.NextTab, k.PrevTab}
+	tabs := []key.Binding{k.Tab1, k.Tab2, k.NextTab, k.PrevTab}
 	general := []key.Binding{k.Refresh, k.Help, k.Quit}
 
 	switch t.tab {
 	case TabRepos:
 		return [][]key.Binding{nav, tabs, {k.FocusNext, k.FocusPrev, k.Enter, k.Filter, k.Escape}, general}
-	case TabJobs:
-		return [][]key.Binding{nav, tabs, {k.FocusNext, k.FocusPrev, k.Enter, k.Escape}, {k.Retry, k.Purge}, general}
-	case TabStatus:
-		return [][]key.Binding{nav, tabs, {k.Sync, k.Purge}, general}
 	default: // TabPRs
-		return [][]key.Binding{nav, tabs, {k.FocusNext, k.FocusPrev, k.Enter, k.Filter, k.Escape}, {k.Merge, k.MergeSafe, k.Close, k.Open}, general}
+		return [][]key.Binding{nav, tabs, {k.FocusNext, k.FocusPrev, k.Enter, k.Filter, k.Escape}, {k.Merge, k.MergeSafe, k.Close, k.Open, k.Sync, k.Purge}, general}
 	}
 }
 
@@ -96,8 +85,6 @@ var GlobalKeys = KeyMap{
 	Refresh:   key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh")),
 	Tab1:      key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "PRs")),
 	Tab2:      key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "Repos")),
-	Tab3:      key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "Jobs")),
-	Tab4:      key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "Status")),
 	NextTab:   key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next tab")),
 	PrevTab:   key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev tab")),
 	FocusNext: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next panel")),
@@ -115,10 +102,9 @@ var GlobalKeys = KeyMap{
 	HalfUp:    key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("C-u", "half page up")),
 
 	Merge:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge PR")),
-	MergeSafe: key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "merge safe PRs")),
+	MergeSafe: key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "safe merge")),
 	Close:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "close PR")),
-	Open:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open in browser")),
-	Sync:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync now")),
-	Retry:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "retry job")),
-	Purge:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "purge failed")),
+	Open:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "browser")),
+	Sync:      key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "sync")),
+	Purge:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "purge")),
 }
