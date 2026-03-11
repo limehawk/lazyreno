@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
@@ -116,6 +117,20 @@ func PanelTitle(title string, focused bool) string {
 		return lipgloss.NewStyle().Foreground(Title).Bold(true).Render(title)
 	}
 	return Dim.Render(title)
+}
+
+// PRAgeForeground returns a color based on PR age.
+// Fresh = green, aging = yellow, stale = red.
+func PRAgeForeground(created time.Time) color.Color {
+	d := time.Since(created)
+	switch {
+	case d < 24*time.Hour:
+		return lipgloss.Color("2") // green
+	case d < 3*24*time.Hour:
+		return lipgloss.Color("3") // yellow
+	default:
+		return lipgloss.Color("1") // red
+	}
 }
 
 // loadBtopTheme parses ~/.config/omarchy/current/theme/btop.theme.

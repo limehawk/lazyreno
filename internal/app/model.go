@@ -312,7 +312,10 @@ func prToRow(pr backend.PR) table.Row {
 		updateType = "dep"
 	}
 
-	return table.Row{status, pr.Title, updateType, backend.RelativeTime(pr.CreatedAt)}
+	age := backend.RelativeTime(pr.CreatedAt)
+	ageStyle := lipgloss.NewStyle().Foreground(ui.PRAgeForeground(pr.CreatedAt))
+	age = ageStyle.Render(age)
+	return table.Row{status, pr.Title, updateType, age}
 }
 
 func (m *Model) rebuildAllRepoList() tea.Cmd {
