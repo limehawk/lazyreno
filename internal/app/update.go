@@ -34,7 +34,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		model, cmd := m.confirmForm.Update(msg)
 		m.confirmForm = model.(*huh.Form)
 		if m.confirmForm.State == huh.StateCompleted {
-			if m.confirmed {
+			if m.confirmed != nil && *m.confirmed {
 				actionCmd := m.confirmFn()
 				m.confirmForm = nil
 				m.confirmFn = nil
@@ -281,7 +281,8 @@ func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) showConfirm(message string, fn func() tea.Cmd) tea.Cmd {
-	m.confirmed = false
+	confirmed := false
+	m.confirmed = &confirmed
 	m.confirmFn = fn
 	m.confirmForm = huh.NewForm(
 		huh.NewGroup(
@@ -289,7 +290,7 @@ func (m *Model) showConfirm(message string, fn func() tea.Cmd) tea.Cmd {
 				Title(message).
 				Affirmative("Yes").
 				Negative("No").
-				Value(&m.confirmed),
+				Value(m.confirmed),
 		),
 	).WithWidth(40).WithTheme(huh.ThemeFunc(ui.HuhTheme))
 	return m.confirmForm.Init()

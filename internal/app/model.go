@@ -50,7 +50,7 @@ type Model struct {
 	help         help.Model
 	confirmForm  *huh.Form
 	confirmFn    func() tea.Cmd
-	confirmed    bool
+	confirmed    *bool
 	flashText    string
 	flashIsError bool
 	flashExpiry  time.Time
