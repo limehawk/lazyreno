@@ -55,7 +55,15 @@ func (c *RenovateClient) GetStatus() (*SystemStatus, error) {
 				} `json:"inProgress"`
 			} `json:"queue"`
 			History struct {
-				Processed int `json:"processed"`
+				Processed    int `json:"processed"`
+				LastFinished struct {
+					JobID      string `json:"jobId"`
+					Repository string `json:"repository"`
+					Status     string `json:"status"`
+					Reason     string `json:"reason"`
+					StartedAt  string `json:"startedAt"`
+					FinishedAt string `json:"finishedAt"`
+				} `json:"lastFinished"`
 			} `json:"history"`
 		} `json:"jobs"`
 		Scheduler struct {
@@ -71,7 +79,7 @@ func (c *RenovateClient) GetStatus() (*SystemStatus, error) {
 	// Parse boot time — format is "2006-01-02 15:04:05"
 	bootTime, _ := time.Parse("2006-01-02 15:04:05", raw.BootTime)
 
-	return &SystemStatus{
+	status := &SystemStatus{
 		Version:    raw.RenovateVersion,
 		BootTime:   bootTime,
 		Uptime:     time.Since(bootTime),
@@ -80,7 +88,24 @@ func (c *RenovateClient) GetStatus() (*SystemStatus, error) {
 		Enabled: map[string]bool{
 			"api": true,
 		},
-	}, nil
+	}
+
+	// Parse last finished job if available.
+	lf := raw.Jobs.History.LastFinished
+	if lf.JobID != "" {
+		job := Job{ID: lf.JobID, Repo: lf.Repository, Status: lf.Status, Trigger: lf.Reason}
+		if t, err := time.Parse("2006-01-02 15:04:05", lf.StartedAt); err == nil {
+			job.StartedAt = &t
+		}
+		if started, err1 := time.Parse("2006-01-02 15:04:05", lf.StartedAt); err1 == nil {
+			if finished, err2 := time.Parse("2006-01-02 15:04:05", lf.FinishedAt); err2 == nil {
+				job.Duration = finished.Sub(started)
+			}
+		}
+		status.LastFinished = &job
+	}
+
+	return status, nil
 }
 
 func (c *RenovateClient) GetJobQueue() ([]Job, error) {

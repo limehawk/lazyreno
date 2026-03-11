@@ -145,6 +145,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = msg.Status
 			m.updateStatusView()
+			cmd := m.rebuildJobList()
+			return m, cmd
 		}
 	case MergePRResultMsg:
 		if msg.Err != nil {

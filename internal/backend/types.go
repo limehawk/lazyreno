@@ -45,13 +45,14 @@ type JobLog struct {
 
 // SystemStatus represents the Renovate CE system state.
 type SystemStatus struct {
-	Version    string
-	BootTime   time.Time
-	Uptime     time.Duration
-	Enabled    map[string]bool // feature flags
-	QueueSize  int
-	RunningJob int
-	FailedJobs int
+	Version      string
+	BootTime     time.Time
+	Uptime       time.Duration
+	Enabled      map[string]bool // feature flags
+	QueueSize    int
+	RunningJob   int
+	FailedJobs   int
+	LastFinished *Job
 }
 
 // QueueStatus from /system/v1/tasks/queue.

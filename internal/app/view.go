@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/ui"
 )
 
@@ -35,7 +36,7 @@ func (m Model) View() tea.View {
 		flashLine = style.Render(m.flashText)
 	}
 
-	helpBar := m.help.View(m.keys)
+	helpBar := m.help.View(TabKeyMap{KeyMap: m.keys, tab: m.activeTab})
 
 	var bottomLines []string
 	if flashLine != "" {
@@ -164,13 +165,32 @@ func (m Model) viewJobs(height int) string {
 	if sel != nil {
 		if ji, ok := sel.(JobItem); ok {
 			job := ji.Job
-			mainContent = fmt.Sprintf(
-				"%s  %s\n%s  %s\n%s  %s\n\n%s  %s",
+
+			statusStyle := ui.SuccessText
+			if job.Status == "failed" {
+				statusStyle = ui.ErrorText
+			} else if job.Status == "running" || job.Status == "pending" {
+				statusStyle = ui.WarningText
+			}
+
+			lines := fmt.Sprintf(
+				"%s  %s\n%s  %s\n%s  %s",
 				ui.Dim.Render("Job:   "), job.ID,
 				ui.Dim.Render("Repo:  "), ui.Bold.Render(job.Repo),
-				ui.Dim.Render("Status:"), job.Status,
-				ui.ShortcutKey.Render("[r]"), "retry  "+ui.ShortcutKey.Render("[p]")+" purge failed",
+				ui.Dim.Render("Status:"), statusStyle.Render(job.Status),
 			)
+			if job.Trigger != "" {
+				lines += fmt.Sprintf("\n%s  %s", ui.Dim.Render("Trigger:"), job.Trigger)
+			}
+			if job.StartedAt != nil {
+				lines += fmt.Sprintf("\n%s  %s", ui.Dim.Render("Started:"), backend.RelativeTime(*job.StartedAt))
+			}
+			if job.Duration > 0 {
+				lines += fmt.Sprintf("\n%s  %s", ui.Dim.Render("Duration:"), job.Duration.Truncate(time.Second).String())
+			}
+			lines += fmt.Sprintf("\n\n%s retry  %s purge failed",
+				ui.ShortcutKey.Render("[r]"), ui.ShortcutKey.Render("[p]"))
+			mainContent = lines
 		}
 	}
 

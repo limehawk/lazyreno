@@ -331,11 +331,25 @@ func (m *Model) rebuildAllRepoList() tea.Cmd {
 
 func (m *Model) rebuildJobList() tea.Cmd {
 	prevIdx := m.jobList.Index()
-	items := make([]list.Item, len(m.jobs))
-	for i, job := range m.jobs {
-		items[i] = JobItem{Job: job}
+	var items []list.Item
+	for _, job := range m.jobs {
+		items = append(items, JobItem{Job: job})
 	}
-	m.jobList.Title = fmt.Sprintf("Queue (%d)", len(items))
+	// Append last finished job from status if available and not already in queue.
+	if m.status != nil && m.status.LastFinished != nil {
+		lf := m.status.LastFinished
+		alreadyListed := false
+		for _, job := range m.jobs {
+			if job.ID == lf.ID {
+				alreadyListed = true
+				break
+			}
+		}
+		if !alreadyListed {
+			items = append(items, JobItem{Job: *lf})
+		}
+	}
+	m.jobList.Title = fmt.Sprintf("Queue (%d)", len(m.jobs))
 	cmd := m.jobList.SetItems(items)
 	if prevIdx < len(items) {
 		m.jobList.Select(prevIdx)
@@ -462,7 +476,7 @@ func (m *Model) updatePRTableColumns(innerW int) {
 
 func (m Model) bodyHeight() int {
 	header := ui.RenderHeader(m.activeTab, m.width)
-	helpBar := m.help.View(m.keys)
+	helpBar := m.help.View(TabKeyMap{KeyMap: m.keys, tab: m.activeTab})
 
 	var bottomLines []string
 	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
