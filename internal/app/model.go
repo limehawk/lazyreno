@@ -7,6 +7,7 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -17,21 +18,14 @@ import (
 	"github.com/limehawk/lazyreno/internal/ui"
 )
 
-const (
-	TabPRs   = 0
-	TabRepos = 1
-	tabCount = 2
-)
-
 type Model struct {
 	cfg      *config.Config
 	renovate *backend.RenovateClient
 	github   *backend.GitHubClient
 	cache    *backend.Cache
 
-	activeTab int
-	width     int
-	height    int
+	width  int
+	height int
 
 	// Shared data
 	repos          []string
@@ -39,6 +33,7 @@ type Model struct {
 	pendingPRs     []backend.PR
 	pendingPRCount int // number of PR fetch responses expected
 	status         *backend.SystemStatus
+	jobs           []backend.Job
 
 	// Filtered PRs for the currently selected repo (maps to prTable rows).
 	filteredPRs []backend.PR
@@ -46,19 +41,23 @@ type Model struct {
 	// UI state
 	keys         KeyMap
 	help         help.Model
+	spinner      spinner.Model
+	lastUpdate   time.Time
+	showRepos    bool // overlay toggle
 	confirmForm  *huh.Form
 	confirmFn    func() tea.Cmd
 	confirmed    *bool
 	flashText    string
 	flashIsError bool
 	flashExpiry  time.Time
-	focusedPanel int // 0=sidebar, 1=main, 2=detail
+	focusedPanel int // 0=sidebar, 1=table, 2=detail
 
-	// Sidebar lists (use default delegate)
-	repoList    list.Model // PRs tab sidebar
-	allRepoList list.Model // Repos tab sidebar
+	// Sidebar lists
+	repoList    list.Model // PR repos sidebar
+	allRepoList list.Model // All repos overlay
+	jobList     list.Model // Jobs panel in sidebar
 
-	// PR table (main panel on PRs tab)
+	// PR table
 	prTable table.Model
 
 	// Detail viewport
@@ -147,12 +146,16 @@ func NewModel(cfg *config.Config) Model {
 	}
 
 	h := help.New()
-	s := help.DefaultDarkStyles()
-	s.ShortKey = ui.ShortcutKey
-	s.FullKey = ui.ShortcutKey
-	s.ShortDesc = ui.Dim
-	s.ShortSeparator = lipgloss.NewStyle().Foreground(ui.Border)
-	h.Styles = s
+	hs := help.DefaultDarkStyles()
+	hs.ShortKey = ui.ShortcutKey
+	hs.FullKey = ui.ShortcutKey
+	hs.ShortDesc = ui.Dim
+	hs.ShortSeparator = lipgloss.NewStyle().Foreground(ui.Border)
+	h.Styles = hs
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(ui.Accent)
 
 	return Model{
 		cfg:         cfg,
@@ -161,10 +164,12 @@ func NewModel(cfg *config.Config) Model {
 		cache:       backend.NewCache(30 * time.Second),
 		keys:        GlobalKeys,
 		help:        h,
+		spinner:     sp,
 		repoList:    newSidebarList("Repos"),
 		allRepoList: newSidebarList("Repos"),
+		jobList:     newSidebarList("Jobs"),
 		prTable:     newPRTable(),
-		detailView: viewport.New(),
+		detailView:  viewport.New(),
 	}
 }
 
@@ -172,7 +177,9 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.fetchRepos(),
 		m.fetchStatus(),
+		m.fetchJobQueue(),
 		m.tickCmd(),
+		m.spinner.Tick,
 	)
 }
 
@@ -357,41 +364,69 @@ func (m *Model) updateDetailView() {
 
 func (m Model) renderStatusBox() string {
 	if m.renovate == nil {
-		return ui.WarningText.Render("Renovate CE not configured") + "\n" +
-			ui.Dim.Render("Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET")
+		return ui.WarningText.Render("Not configured")
 	}
 	if m.status == nil {
-		return ui.Dim.Render("Connecting to Renovate CE...")
+		return ui.Dim.Render("Connecting...")
 	}
 
 	s := m.status
 	uptime := s.Uptime.Truncate(time.Minute).String()
 
-	lines := []string{
-		fmt.Sprintf("%s  %s", ui.Dim.Render("System"), ui.Bold.Render("v"+s.Version)),
-		fmt.Sprintf("%s  %s", ui.Dim.Render("Uptime"), uptime),
-		fmt.Sprintf("%s  %d", ui.Dim.Render("Queue "), s.QueueSize),
+	return strings.Join([]string{
+		fmt.Sprintf("%s %s  %s %s  %s %d",
+			ui.Dim.Render("CE"), ui.Bold.Render("v"+s.Version),
+			ui.Dim.Render("Up"), uptime,
+			ui.Dim.Render("Q"), s.QueueSize),
+	}, "\n")
+}
+
+func (m Model) renderJobBox() string {
+	if m.status == nil || m.status.LastFinished == nil {
+		return ui.Dim.Render("No recent jobs")
 	}
 
-	if s.LastFinished != nil {
-		lf := s.LastFinished
-		statusStyle := ui.SuccessText
-		if lf.Status == "failed" {
-			statusStyle = ui.ErrorText
-		}
-		_, repo := splitRepo(lf.Repo)
-		jobLine := fmt.Sprintf("%s  %s", ui.Dim.Render("Last  "), repo)
-		if lf.Duration > 0 {
-			jobLine += fmt.Sprintf("  %s  %s",
-				lf.Duration.Truncate(time.Second).String(),
-				statusStyle.Render(lf.Status))
-		} else {
-			jobLine += "  " + statusStyle.Render(lf.Status)
-		}
-		lines = append(lines, jobLine)
+	lf := m.status.LastFinished
+	statusStyle := ui.SuccessText
+	if lf.Status == "failed" {
+		statusStyle = ui.ErrorText
 	}
 
-	return strings.Join(lines, "\n")
+	_, repo := splitRepo(lf.Repo)
+	line := repo
+	if lf.Duration > 0 {
+		line += "  " + lf.Duration.Truncate(time.Second).String()
+	}
+	line += "  " + statusStyle.Render(lf.Status)
+
+	return line
+}
+
+func (m *Model) rebuildJobList() tea.Cmd {
+	prevIdx := m.jobList.Index()
+	var items []list.Item
+	for _, job := range m.jobs {
+		items = append(items, JobItem{Job: job})
+	}
+	if m.status != nil && m.status.LastFinished != nil {
+		lf := m.status.LastFinished
+		found := false
+		for _, j := range m.jobs {
+			if j.ID == lf.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			items = append(items, JobItem{Job: *lf})
+		}
+	}
+	m.jobList.Title = fmt.Sprintf("Jobs (%d)", len(m.jobs))
+	cmd := m.jobList.SetItems(items)
+	if prevIdx < len(items) {
+		m.jobList.Select(prevIdx)
+	}
+	return cmd
 }
 
 func (m *Model) resizeLists() {
@@ -400,24 +435,37 @@ func (m *Model) resizeLists() {
 		return
 	}
 
-	sidebarWidth, mainWidth, detailWidth := m.panelWidths()
+	leftWidth, rightWidth := m.panelWidths()
 
-	sidebarInnerW, sidebarInnerH := ui.InnerSize(sidebarWidth, bodyHeight)
-	mainInnerW, mainInnerH := ui.InnerSize(mainWidth, bodyHeight)
-
-	m.repoList.SetSize(sidebarInnerW, sidebarInnerH)
-	m.allRepoList.SetSize(sidebarInnerW, sidebarInnerH)
-
-	m.prTable.SetWidth(mainInnerW)
-	m.prTable.SetHeight(mainInnerH)
-	m.updatePRTableColumns(mainInnerW)
-
-	if detailWidth > 0 {
-		detailInnerW, detailInnerH := ui.InnerSize(detailWidth, bodyHeight)
-		m.detailView.SetWidth(detailInnerW)
-		m.detailView.SetHeight(detailInnerH - 1) // -1 for title line
+	// Left column: stacked panels
+	systemH := 5
+	jobsH := 8
+	prListH := bodyHeight - systemH - jobsH
+	if prListH < 6 {
+		prListH = 6
 	}
 
+	prInnerW, prInnerH := ui.InnerSize(leftWidth, prListH)
+	m.repoList.SetSize(prInnerW, prInnerH)
+
+	jobInnerW, jobInnerH := ui.InnerSize(leftWidth, jobsH)
+	m.jobList.SetSize(jobInnerW, jobInnerH)
+
+	// Right column: PR table top, detail bottom (55/45 split)
+	tableH := bodyHeight * 55 / 100
+	detailH := bodyHeight - tableH
+
+	tableInnerW, tableInnerH := ui.InnerSize(rightWidth, tableH)
+	m.prTable.SetWidth(tableInnerW)
+	m.prTable.SetHeight(tableInnerH)
+	m.updatePRTableColumns(tableInnerW)
+
+	detailInnerW, detailInnerH := ui.InnerSize(rightWidth, detailH)
+	m.detailView.SetWidth(detailInnerW)
+	m.detailView.SetHeight(detailInnerH - 1)
+
+	// Repos overlay list (uses full body dimensions)
+	m.allRepoList.SetSize(m.width-4, bodyHeight-4)
 }
 
 func (m *Model) updatePRTableColumns(innerW int) {
@@ -436,8 +484,8 @@ func (m *Model) updatePRTableColumns(innerW int) {
 }
 
 func (m Model) bodyHeight() int {
-	header := ui.RenderHeader(m.activeTab, m.width)
-	helpBar := m.help.View(TabKeyMap{KeyMap: m.keys, tab: m.activeTab})
+	header := ui.RenderStatusBar("", "", m.width)
+	helpBar := m.help.View(m.keys)
 
 	var bottomLines []string
 	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
@@ -453,40 +501,21 @@ func (m Model) bodyHeight() int {
 	return h
 }
 
-func (m Model) panelWidths() (sidebar, main, detail int) {
+func (m Model) panelWidths() (left, right int) {
 	w := m.width
-
 	switch {
-	case w >= 180:
-		sidebar = w * 20 / 100
-		detail = w * 30 / 100
-		main = w - sidebar - detail
-	case w >= 140:
-		sidebar = w * 22 / 100
-		detail = w * 28 / 100
-		main = w - sidebar - detail
-	case w >= 100:
-		sidebar = 25
-		detail = w * 25 / 100
-		main = w - sidebar - detail
+	case w >= 160:
+		left = 30
+	case w >= 120:
+		left = 26
 	case w >= 80:
-		sidebar = 25
-		detail = 0
-		main = w - sidebar
+		left = 22
 	default:
-		sidebar = 20
-		detail = 0
-		main = w - sidebar
+		left = 20
 	}
-
-	if sidebar < 18 {
-		sidebar = 18
-	}
-	if detail > 0 && detail < 25 {
-		detail = 25
-	}
-	if main < 20 {
-		main = 20
+	right = w - left
+	if right < 30 {
+		right = 30
 	}
 	return
 }

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -24,22 +23,29 @@ func (m Model) View() tea.View {
 		return view(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.confirmForm.View()))
 	}
 
-	header := ui.RenderHeader(m.activeTab, m.width)
+	// Repos overlay
+	if m.showRepos {
+		return view(m.viewReposOverlay())
+	}
 
-	var flashLine string
+	// Status bar
+	updatedAgo := ""
+	if !m.lastUpdate.IsZero() {
+		d := time.Since(m.lastUpdate).Truncate(time.Second)
+		updatedAgo = "updated " + d.String() + " ago"
+	}
+	header := ui.RenderStatusBar(m.spinner.View(), updatedAgo, m.width)
+
+	// Help bar
+	helpBar := m.help.View(m.keys)
+
+	var bottomLines []string
 	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
 		style := ui.SuccessText
 		if m.flashIsError {
 			style = ui.ErrorText
 		}
-		flashLine = style.Render(m.flashText)
-	}
-
-	helpBar := m.help.View(TabKeyMap{KeyMap: m.keys, tab: m.activeTab})
-
-	var bottomLines []string
-	if flashLine != "" {
-		bottomLines = append(bottomLines, flashLine)
+		bottomLines = append(bottomLines, style.Render(m.flashText))
 	}
 	bottomLines = append(bottomLines, helpBar)
 	bottom := lipgloss.JoinVertical(lipgloss.Left, bottomLines...)
@@ -49,106 +55,60 @@ func (m Model) View() tea.View {
 		bodyHeight = 1
 	}
 
-	var body string
-	switch m.activeTab {
-	case TabPRs:
-		body = m.viewPRs(bodyHeight)
-	case TabRepos:
-		body = m.viewRepos(bodyHeight)
-	}
+	body := m.viewDashboard(bodyHeight)
 
 	return view(lipgloss.JoinVertical(lipgloss.Left, header, body, bottom))
 }
 
-func (m Model) viewPRs(height int) string {
-	sidebarWidth, mainWidth, detailWidth := m.panelWidths()
+func (m Model) viewDashboard(height int) string {
+	leftWidth, rightWidth := m.panelWidths()
 
-	sidebar := ui.WrapListInPanel(
-		m.repoList.View(),
-		m.focusedPanel == 0, sidebarWidth, height,
-	)
-
-	main := ui.RenderPanel(
-		"", m.prTable.View(),
-		m.focusedPanel == 1, mainWidth, height,
-	)
-
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
-
-	if detailWidth > 0 {
-		pr := m.getSelectedPR()
-		var detailContent string
-
-		if pr != nil {
-			// PR detail on top, status box on bottom
-			detailContent = m.detailView.View() + "\n\n" +
-				ui.Dim.Render("─── System ───") + "\n" +
-				m.renderStatusBox()
-		} else {
-			// No PR selected — status expands to fill
-			detailContent = m.renderStatusBox()
-		}
-
-		detail := ui.RenderPanel(
-			"Details", detailContent,
-			m.focusedPanel == 2, detailWidth, height,
-		)
-		panels = lipgloss.JoinHorizontal(lipgloss.Top, panels, detail)
+	// Left column: stacked panels
+	systemH := 5
+	jobsH := 8
+	prListH := height - systemH - jobsH
+	if prListH < 6 {
+		prListH = 6
 	}
 
-	return panels
+	prSidebar := ui.WrapListInPanel(
+		m.repoList.View(),
+		m.focusedPanel == 0, leftWidth, prListH,
+	)
+
+	systemPanel := ui.RenderPanel(
+		"System", m.renderStatusBox(),
+		false, leftWidth, systemH,
+	)
+
+	jobsPanel := ui.WrapListInPanel(
+		m.jobList.View(),
+		false, leftWidth, jobsH,
+	)
+
+	leftCol := lipgloss.JoinVertical(lipgloss.Left, prSidebar, systemPanel, jobsPanel)
+
+	// Right column: PR table top, detail bottom
+	tableH := height * 55 / 100
+	detailH := height - tableH
+
+	tablePanel := ui.RenderPanel(
+		"", m.prTable.View(),
+		m.focusedPanel == 1, rightWidth, tableH,
+	)
+
+	detailPanel := ui.RenderPanel(
+		"Details", m.detailView.View(),
+		m.focusedPanel == 2, rightWidth, detailH,
+	)
+
+	rightCol := lipgloss.JoinVertical(lipgloss.Left, tablePanel, detailPanel)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftCol, rightCol)
 }
 
-func (m Model) viewRepos(height int) string {
-	sidebarWidth := m.width * 25 / 100
-	if sidebarWidth < 22 {
-		sidebarWidth = 22
-	}
-	if sidebarWidth > 40 {
-		sidebarWidth = 40
-	}
-	mainWidth := m.width - sidebarWidth
-
-	sidebar := ui.WrapListInPanel(
-		m.allRepoList.View(),
-		m.focusedPanel == 0, sidebarWidth, height,
-	)
-
-	mainContent := ui.Dim.Render("Select a repo")
-	sel := m.allRepoList.SelectedItem()
-	if sel != nil {
-		if ri, ok := sel.(AllRepoItem); ok {
-			fullName := m.cfg.GitHub.Owner + "/" + ri.Name
-
-			prCount := 0
-			for _, pr := range m.prs {
-				if pr.Repo == fullName {
-					prCount++
-				}
-			}
-
-			prCountStr := ui.SuccessText.Render(fmt.Sprintf("%d", prCount))
-			if prCount > 0 {
-				prCountStr = ui.WarningText.Render(fmt.Sprintf("%d", prCount))
-			}
-
-			mainContent = fmt.Sprintf(
-				"%s  %s\n%s  %s",
-				ui.Dim.Render("Repository:"),
-				ui.Bold.Render(fullName),
-				ui.Dim.Render("Open PRs:  "),
-				prCountStr,
-			)
-		}
-	}
-
-	main := ui.RenderPanel(
-		"Repository Info",
-		mainContent,
-		m.focusedPanel == 1,
-		mainWidth,
-		height,
-	)
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, main)
+func (m Model) viewReposOverlay() string {
+	content := m.allRepoList.View()
+	overlay := ui.RenderPanel("All Repos (press 2 or esc to close)", content, true, m.width-2, m.height-2)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, overlay)
 }
