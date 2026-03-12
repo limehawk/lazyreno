@@ -2,7 +2,7 @@
 dist/
 *.exe
 pkg/
-src/
+/src/
 *.pkg.tar.zst
 CLAUDE.md
 docs/
