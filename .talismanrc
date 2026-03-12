@@ -1,0 +1,5 @@
+threshold: medium
+fileignoreconfig:
+  - filename: Cargo.lock
+    ignore_detectors:
+      - filecontent
