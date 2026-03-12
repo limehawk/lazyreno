@@ -1,4 +1,4 @@
-# Maintainer: Limehawk <limehawk@users.noreply.github.com>
+# Maintainer: Limehawk <128890849+limehawk@users.noreply.github.com>
 pkgname=lazyreno
 pkgver=0.1.0
 pkgrel=2
