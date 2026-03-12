@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
 
 use super::theme::Theme;
@@ -18,7 +18,26 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
 
     let repo_name = app.selected_repo_name().unwrap_or("—");
     let prs = app.current_prs();
-    let title = format!(" PRs — {} ({}) ", repo_name, prs.len());
+
+    // Inner height minus 2 for borders, minus 1 for header row.
+    let inner_height = area.height.saturating_sub(3) as usize;
+    let total = prs.len();
+    let scroll_arrow = if total > inner_height {
+        if app.selected_pr == 0 {
+            " ↓"
+        } else if app.selected_pr >= total - 1 {
+            " ↑"
+        } else {
+            " ↕"
+        }
+    } else {
+        ""
+    };
+
+    let title = Line::from(vec![
+        Span::raw(format!(" PRs — {} ({}) ", repo_name, total)),
+        Span::styled(scroll_arrow, Style::default().fg(theme.muted)),
+    ]);
 
     let block = Block::default()
         .title(title)

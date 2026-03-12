@@ -30,6 +30,7 @@ pub struct App {
     #[allow(dead_code)]
     pub filter_text: String,
     pub running: bool,
+    pub loaded: bool,
     pub cancel_token: CancellationToken,
     pub action_tx: mpsc::Sender<ActionResult>,
     pub github: Arc<GithubClient>,
@@ -60,6 +61,7 @@ impl App {
             all_repos_filter: String::new(),
             filter_text: String::new(),
             running: true,
+            loaded: false,
             cancel_token,
             action_tx,
             github,
@@ -157,6 +159,8 @@ impl App {
                 self.flash = Some(FlashMessage::error(format!("Jobs fetch: {e}")));
             }
         }
+
+        self.loaded = true;
     }
 
     // -----------------------------------------------------------------------

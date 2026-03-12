@@ -1,8 +1,10 @@
 pub mod confirm;
 pub mod detail;
 pub mod flash;
+pub mod footer;
 pub mod help;
 pub mod jobs;
+pub mod loading;
 pub mod pr_table;
 pub mod repos_overlay;
 pub mod sidebar;
@@ -19,48 +21,61 @@ use theme::Theme;
 pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let size = frame.area();
 
-    // Flash bar takes 1 row at the bottom if present.
-    let (main_area, flash_area) = if app.flash.is_some() {
-        let chunks = Layout::default()
+    // Bottom bars: footer (always) + flash (when present).
+    // Layout: [main] [flash?] [footer]
+    let bottom_rows = if app.flash.is_some() { 2u16 } else { 1 };
+    let vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(bottom_rows)])
+        .split(size);
+    let main_area = vert[0];
+    let bottom_area = vert[1];
+
+    let (flash_area, footer_area) = if app.flash.is_some() {
+        let rows = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
-            .split(size);
-        (chunks[0], Some(chunks[1]))
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(bottom_area);
+        (Some(rows[0]), rows[1])
     } else {
-        (size, None)
+        (None, bottom_area)
     };
 
-    // Horizontal: sidebar | right
-    let h_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Percentage(75)])
-        .split(main_area);
-    let sidebar_area = h_chunks[0];
-    let right_area = h_chunks[1];
+    // Loading state — show centered message before first data arrives.
+    if !app.loaded {
+        loading::render(frame, main_area, theme);
+        footer::render(app, frame, footer_area, theme);
+        return;
+    }
 
-    // Right vertical: PR table | bottom
-    let right_v = Layout::default()
+    // Horizontal: sidebar | middle (PRs+detail) | right (system+jobs)
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(20),        // sidebar
+            Constraint::Percentage(50), // PRs + detail
+            Constraint::Percentage(25), // system + jobs
+        ])
+        .split(main_area);
+    let sidebar_area = cols[0];
+    let middle_area = cols[1];
+    let right_area = cols[2];
+
+    // Middle vertical: PR table | detail (equal height)
+    let mid_v = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Min(8)])
-        .split(right_area);
-    let pr_table_area = right_v[0];
-    let bottom_area = right_v[1];
+        .split(middle_area);
+    let pr_table_area = mid_v[0];
+    let detail_area = mid_v[1];
 
-    // Bottom horizontal: detail | status_jobs
-    let bottom_h = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-        .split(bottom_area);
-    let detail_area = bottom_h[0];
-    let status_jobs_area = bottom_h[1];
-
-    // Status_jobs vertical: status | jobs
-    let sj_v = Layout::default()
+    // Right vertical: system (20%) | jobs (80%)
+    let right_v = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
-        .split(status_jobs_area);
-    let status_area = sj_v[0];
-    let jobs_area = sj_v[1];
+        .constraints([Constraint::Ratio(1, 5), Constraint::Ratio(4, 5)])
+        .split(right_area);
+    let status_area = right_v[0];
+    let jobs_area = right_v[1];
 
     // Draw panels.
     sidebar::render(app, frame, sidebar_area, theme);
@@ -68,6 +83,9 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     detail::render(app, frame, detail_area, theme);
     status::render(app, frame, status_area, theme);
     jobs::render(app, frame, jobs_area, theme);
+
+    // Footer bar.
+    footer::render(app, frame, footer_area, theme);
 
     // Flash bar.
     if let Some(area) = flash_area {

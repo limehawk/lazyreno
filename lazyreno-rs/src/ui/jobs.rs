@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
 use super::theme::Theme;
@@ -9,8 +9,21 @@ use crate::app::App;
 use crate::types::JobState;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let total = app.jobs.len();
+    let scroll_arrow = if total > inner_height {
+        " ↕"
+    } else {
+        ""
+    };
+
+    let title = Line::from(vec![
+        Span::raw(" Jobs "),
+        Span::styled(scroll_arrow, Style::default().fg(theme.muted)),
+    ]);
+
     let block = Block::default()
-        .title(" Jobs ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(theme.border_unfocused);
 

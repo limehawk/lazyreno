@@ -42,7 +42,7 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('?') => {
             app.show_help = true;
         }
-        KeyCode::Char('2') => {
+        KeyCode::Char('a') => {
             app.show_all_repos = true;
             app.all_repos_selected = 0;
             app.all_repos_filter.clear();
@@ -89,7 +89,7 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('s') => {
             app.dispatch_sync();
         }
-        KeyCode::Char('p') => {
+        KeyCode::Char('P') => {
             app.confirming = Some(ConfirmAction::PurgeJobs);
         }
 
@@ -104,7 +104,7 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
                 app.confirming = Some(ConfirmAction::MergeAllSafe(repo.to_string()));
             }
         }
-        KeyCode::Char('c') if app.focused_panel == Panel::PrTable => {
+        KeyCode::Char('x') if app.focused_panel == Panel::PrTable => {
             if let (Some(pr), Some(repo)) = (app.selected_pr(), app.selected_repo_name()) {
                 app.confirming = Some(ConfirmAction::ClosePr(pr.number, repo.to_string()));
             }
@@ -121,7 +121,7 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
 
 fn handle_all_repos_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc | KeyCode::Char('2') => {
+        KeyCode::Esc => {
             app.show_all_repos = false;
             app.all_repos_filter.clear();
         }

@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
 use super::theme::Theme;
@@ -16,8 +16,21 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         theme.border_unfocused
     };
 
+    // Inner height = area minus 2 for borders.
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let total = app.repos.len();
+    let scroll_indicator = scroll_hint(app.selected_repo, total, inner_height, theme);
+
+    let title = match scroll_indicator {
+        Some(ref hint) => Line::from(vec![
+            Span::raw(" Repos "),
+            hint.clone(),
+        ]),
+        None => Line::from(" Repos "),
+    };
+
     let block = Block::default()
-        .title(" Repos ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(border_style);
 
@@ -44,4 +57,23 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
 
     let list = List::new(items).block(block);
     frame.render_widget(list, area);
+}
+
+/// Returns a scroll hint span if the list overflows the visible area.
+/// Shows ↑/↓/↕ depending on scroll position.
+fn scroll_hint(selected: usize, total: usize, visible: usize, theme: &Theme) -> Option<Span<'static>> {
+    if total <= visible {
+        return None;
+    }
+    let arrow = if selected == 0 {
+        "↓"
+    } else if selected >= total - 1 {
+        "↑"
+    } else {
+        "↕"
+    };
+    Some(Span::styled(
+        arrow.to_string(),
+        Style::default().fg(theme.muted),
+    ))
 }
