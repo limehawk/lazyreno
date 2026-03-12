@@ -1,14 +1,37 @@
+<div align="center">
+
 # lazyreno
 
-A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend/renovate-ce-ee). Monitor PRs, repos, jobs, and system status from your terminal.
+A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend/renovate-ce-ee).
+
+Monitor PRs, repos, jobs, and system status — all from your terminal.
+
+<!-- TODO: add demo.gif once recorded -->
+<!-- ![demo](demo.gif) -->
+
+[![AUR](https://img.shields.io/aur/version/lazyreno)](https://aur.archlinux.org/packages/lazyreno)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org/)
+
+</div>
+
+---
+
+## Why
+
+Renovate CE generates a flood of dependency PRs across repos. Clicking through GitHub to review, merge, and close them is tedious. lazyreno gives you a single keyboard-driven view of everything — PRs grouped by repo, bulk-merge safe updates, monitor job queues, trigger syncs — without leaving the terminal.
 
 ## Features
 
-- **3-column layout** — Sidebar repos, PR table + detail, system status + jobs
-- **PR management** — Merge, bulk-merge safe (minor/patch), close PRs with branch cleanup
-- **Job monitoring** — Live view of running/pending Renovate jobs
-- **System status** — Renovate version, uptime, queue depth
-- Vim-style navigation, context-sensitive footer hints, keyboard-driven
+- **3-panel bento layout** — repo sidebar, PR table + detail, system status + jobs
+- **Bulk merge** — merge all safe (minor/patch, mergeable, checks passing) PRs in one keystroke
+- **PR management** — merge, close with branch cleanup, open in browser
+- **Job monitoring** — live view of running/pending Renovate jobs with queue depth
+- **System status** — Renovate version, uptime, last finished job
+- **Vim navigation** — `hjkl`, `g`/`G`, `Ctrl+u`/`Ctrl+d`, context-sensitive hints
+- **Fuzzy repo filter** — `a` opens an overlay to search across all repos
+- **1Password integration** — `op://` secret references resolved automatically
+- **Auto-refresh** — configurable polling interval
 
 ## Install
 
@@ -27,7 +50,9 @@ cargo build --release
 cp target/release/lazyreno ~/.local/bin/
 ```
 
-Or download a binary from [Releases](https://github.com/limehawk/lazyreno/releases).
+### Releases
+
+Pre-built binaries available on the [releases page](https://github.com/limehawk/lazyreno/releases).
 
 ## Configuration
 
@@ -49,7 +74,7 @@ accent = "cyan"
 
 ### 1Password
 
-Secrets can be [1Password secret references](https://developer.1password.com/docs/cli/secret-references/) — they'll be resolved automatically via the `op` CLI:
+Secrets can be [1Password secret references](https://developer.1password.com/docs/cli/secret-references/) — resolved automatically via the `op` CLI:
 
 ```toml
 [renovate]
@@ -61,14 +86,14 @@ token = "op://Dev/My GitHub Token/token"
 
 ### Environment variables
 
-Secrets can also be set via environment variables, which override config file values:
+Override config values with environment variables:
 
 ```bash
 export LAZYRENO_RENOVATE_SECRET="your-renovate-api-secret"
 export LAZYRENO_GITHUB_TOKEN="your-github-token"  # or GITHUB_TOKEN
 ```
 
-### Renovate CE API Setup
+### Renovate CE API setup
 
 Enable the APIs on your Renovate CE instance:
 
@@ -85,34 +110,34 @@ RENOVATE_REPOSITORY_CACHE=enabled
 ### Navigation
 
 | Key | Action |
-|-----|--------|
-| `j`/`k` | Navigate up/down |
-| `h`/`l` | Switch panel |
-| `g`/`G` | Jump to top/bottom |
-| `Ctrl+u`/`Ctrl+d` | Half page up/down |
-| `Tab`/`Shift+Tab` | Cycle panel focus |
+|---|---|
+| `j` / `k` | Navigate up / down |
+| `h` / `l` | Switch panel |
+| `g` / `G` | Jump to top / bottom |
+| `Ctrl+u` / `Ctrl+d` | Half page up / down |
+| `Tab` / `Shift+Tab` | Cycle panel focus |
 | `Enter` | Select / drill in |
 
 ### Actions
 
 | Key | Action |
-|-----|--------|
+|---|---|
 | `m` | Merge selected PR |
-| `M` | Merge all safe PRs |
+| `M` | Merge all safe PRs in repo |
 | `x` | Close PR + delete branch |
 | `o` | Open PR in browser |
 | `s` | Trigger Renovate sync |
 | `P` | Purge finished jobs |
 
-### Other
+### General
 
 | Key | Action |
-|-----|--------|
-| `a` | All repos overlay |
+|---|---|
+| `a` | All repos overlay (fuzzy filter) |
+| `R` | Force refresh |
 | `?` | Help |
-| `R` | Refresh |
 | `q` | Quit |
 
 ## License
 
-MIT
+[MIT](LICENSE)
