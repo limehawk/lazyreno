@@ -1,0 +1,18 @@
+[
+  {
+    "id": "job-002",
+    "repository": "org/frontend",
+    "status": "running",
+    "startedAt": "2026-03-11T11:00:00Z",
+    "duration": null,
+    "trigger": "webhook"
+  },
+  {
+    "id": "job-003",
+    "repository": "org/infra",
+    "status": "pending",
+    "startedAt": null,
+    "duration": null,
+    "trigger": "scheduled"
+  }
+]
