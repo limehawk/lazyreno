@@ -6,8 +6,7 @@ A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend
 
 Monitor PRs, repos, jobs, and system status — all from your terminal.
 
-<!-- TODO: add demo.gif once recorded -->
-<!-- ![demo](demo.gif) -->
+![demo](demo.gif)
 
 [![AUR](https://img.shields.io/aur/version/lazyreno)](https://aur.archlinux.org/packages/lazyreno)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
