@@ -1,14 +1,14 @@
 # lazyreno
 
-A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend/renovate-ce-ee).
+A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend/renovate-ce-ee). Monitor PRs, repos, jobs, and system status from your terminal.
 
 ## Features
 
-- **PRs tab** — View and merge Renovate PRs across all repos. Bulk-merge safe (minor/patch) PRs.
-- **Repos tab** — Browse all repos managed by Renovate.
-- **Jobs tab** — Monitor the Renovate job queue. Retry failed jobs.
-- **Status tab** — System overview, trigger sync, purge failed jobs.
-- Vim-style navigation, fuzzy filtering, keyboard-driven.
+- **3-column layout** — Sidebar repos, PR table + detail, system status + jobs
+- **PR management** — Merge, bulk-merge safe (minor/patch), close PRs with branch cleanup
+- **Job monitoring** — Live view of running/pending Renovate jobs
+- **System status** — Renovate version, uptime, queue depth
+- Vim-style navigation, context-sensitive footer hints, keyboard-driven
 
 ## Install
 
@@ -18,10 +18,13 @@ A lazy-style TUI dashboard for self-hosted [Renovate CE](https://github.com/mend
 yay -S lazyreno
 ```
 
-### Go
+### From source
 
 ```bash
-go install github.com/limehawk/lazyreno/cmd/lazyreno@latest
+git clone https://github.com/limehawk/lazyreno.git
+cd lazyreno
+cargo build --release
+cp target/release/lazyreno ~/.local/bin/
 ```
 
 Or download a binary from [Releases](https://github.com/limehawk/lazyreno/releases).
@@ -41,6 +44,7 @@ token = "your-github-token"
 
 [ui]
 refresh_interval = "30s"
+accent = "cyan"
 ```
 
 ### 1Password
@@ -78,18 +82,35 @@ RENOVATE_REPOSITORY_CACHE=enabled
 
 ## Keybindings
 
+### Navigation
+
 | Key | Action |
 |-----|--------|
-| `1`-`4` | Switch tabs |
 | `j`/`k` | Navigate up/down |
-| `Tab` | Cycle panel focus |
+| `h`/`l` | Switch panel |
+| `g`/`G` | Jump to top/bottom |
+| `Ctrl+u`/`Ctrl+d` | Half page up/down |
+| `Tab`/`Shift+Tab` | Cycle panel focus |
+| `Enter` | Select / drill in |
+
+### Actions
+
+| Key | Action |
+|-----|--------|
 | `m` | Merge selected PR |
 | `M` | Merge all safe PRs |
-| `c` | Close PR + delete branch |
+| `x` | Close PR + delete branch |
+| `o` | Open PR in browser |
 | `s` | Trigger Renovate sync |
-| `r` | Retry failed job |
-| `R` | Refresh all data |
+| `P` | Purge finished jobs |
+
+### Other
+
+| Key | Action |
+|-----|--------|
+| `a` | All repos overlay |
 | `?` | Help |
+| `R` | Refresh |
 | `q` | Quit |
 
 ## License
