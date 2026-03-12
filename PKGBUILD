@@ -1,7 +1,7 @@
 # Maintainer: Limehawk <128890849+limehawk@users.noreply.github.com>
 pkgname=lazyreno
-pkgver=0.1.0
-pkgrel=2
+pkgver=0.2.0
+pkgrel=1
 pkgdesc="TUI dashboard for self-hosted Renovate CE"
 arch=('x86_64' 'aarch64')
 url="https://github.com/limehawk/lazyreno"
