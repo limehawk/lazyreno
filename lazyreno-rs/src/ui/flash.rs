@@ -1,11 +1,11 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
+use super::theme::Theme;
 use crate::app::App;
 use crate::types::FlashLevel;
-use super::theme::Theme;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     if let Some(ref flash) = app.flash {

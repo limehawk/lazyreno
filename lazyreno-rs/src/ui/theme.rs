@@ -1,5 +1,6 @@
 use ratatui::style::{Color, Style};
 
+#[allow(dead_code)]
 pub struct Theme {
     pub accent: Color,
     pub dim: Color,

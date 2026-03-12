@@ -1,16 +1,16 @@
-pub mod theme;
-pub mod sidebar;
-pub mod pr_table;
-pub mod detail;
-pub mod status;
-pub mod jobs;
-pub mod help;
-pub mod repos_overlay;
 pub mod confirm;
+pub mod detail;
 pub mod flash;
+pub mod help;
+pub mod jobs;
+pub mod pr_table;
+pub mod repos_overlay;
+pub mod sidebar;
+pub mod status;
+pub mod theme;
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use crate::app::App;
 use theme::Theme;

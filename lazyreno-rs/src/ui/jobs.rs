@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListItem};
-use ratatui::Frame;
 
+use super::theme::Theme;
 use crate::app::App;
 use crate::types::JobState;
-use super::theme::Theme;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let block = Block::default()

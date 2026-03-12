@@ -1,11 +1,11 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
-use crate::app::App;
 use super::theme::Theme;
+use crate::app::App;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     frame.render_widget(Clear, area);

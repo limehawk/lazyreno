@@ -1,11 +1,11 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
-use crate::app::App;
 use super::theme::Theme;
+use crate::app::App;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let block = Block::default()
@@ -17,10 +17,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         let lines = vec![
             Line::from(vec![
                 Span::styled("● ", Style::default().fg(theme.success)),
-                Span::styled(
-                    format!("v{}", st.version),
-                    Style::default().fg(theme.text),
-                ),
+                Span::styled(format!("v{}", st.version), Style::default().fg(theme.text)),
             ]),
             Line::from(Span::styled(
                 format!("Up {}", st.uptime),

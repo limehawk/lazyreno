@@ -106,8 +106,7 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('c') if app.focused_panel == Panel::PrTable => {
             if let (Some(pr), Some(repo)) = (app.selected_pr(), app.selected_repo_name()) {
-                app.confirming =
-                    Some(ConfirmAction::ClosePr(pr.number, repo.to_string()));
+                app.confirming = Some(ConfirmAction::ClosePr(pr.number, repo.to_string()));
             }
         }
         KeyCode::Char('o') if app.focused_panel == Panel::PrTable => {
@@ -159,9 +158,11 @@ fn execute_confirmed(app: &mut App, action: ConfirmAction) {
             app.dispatch_merge_all_safe(repo);
         }
         ConfirmAction::ClosePr(number, repo) => {
-            if let Some(pr) = app.prs.get(&repo).and_then(|prs| {
-                prs.iter().find(|p| p.number == number)
-            }) {
+            if let Some(pr) = app
+                .prs
+                .get(&repo)
+                .and_then(|prs| prs.iter().find(|p| p.number == number))
+            {
                 let branch = pr.branch.clone();
                 app.dispatch_close(number, repo, branch);
             }
@@ -188,7 +189,7 @@ pub fn filtered_all_repos_len(app: &App) -> usize {
 mod tests {
     use super::*;
     use crate::app::App;
-    use crate::types::{Repo, UpdateType, PR};
+    use crate::types::{PR, Repo, UpdateType};
     use chrono::Utc;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use std::sync::Arc;
@@ -207,9 +208,7 @@ mod tests {
     fn make_app() -> App {
         let cancel = CancellationToken::new();
         let (tx, _rx) = mpsc::channel(16);
-        let gh = Arc::new(
-            crate::api::github::GithubClient::new("fake", "org").unwrap(),
-        );
+        let gh = Arc::new(crate::api::github::GithubClient::new("fake", "org").unwrap());
         let ren = Arc::new(crate::api::renovate::RenovateClient::new(
             "http://localhost",
             "secret",
@@ -219,8 +218,16 @@ mod tests {
 
     fn populate_app(app: &mut App) {
         app.repos = vec![
-            Repo { full_name: "org/alpha".into(), name: "alpha".into(), pr_count: 2 },
-            Repo { full_name: "org/beta".into(), name: "beta".into(), pr_count: 1 },
+            Repo {
+                full_name: "org/alpha".into(),
+                name: "alpha".into(),
+                pr_count: 2,
+            },
+            Repo {
+                full_name: "org/beta".into(),
+                name: "beta".into(),
+                pr_count: 1,
+            },
         ];
         app.prs.insert(
             "org/alpha".into(),
@@ -359,9 +366,21 @@ mod tests {
     async fn all_repos_overlay_filter() {
         let mut app = make_app();
         app.all_repos = vec![
-            Repo { full_name: "org/alpha".into(), name: "alpha".into(), pr_count: 0 },
-            Repo { full_name: "org/beta".into(), name: "beta".into(), pr_count: 0 },
-            Repo { full_name: "org/gamma".into(), name: "gamma".into(), pr_count: 0 },
+            Repo {
+                full_name: "org/alpha".into(),
+                name: "alpha".into(),
+                pr_count: 0,
+            },
+            Repo {
+                full_name: "org/beta".into(),
+                name: "beta".into(),
+                pr_count: 0,
+            },
+            Repo {
+                full_name: "org/gamma".into(),
+                name: "gamma".into(),
+                pr_count: 0,
+            },
         ];
         app.show_all_repos = true;
 

@@ -8,7 +8,7 @@ use tracing::error;
 use crate::api::github::GithubClient;
 use crate::api::renovate::RenovateClient;
 use crate::types::{
-    ActionResult, ConfirmAction, FetchResult, FlashMessage, Job, Panel, Repo, SystemStatus, PR,
+    ActionResult, ConfirmAction, FetchResult, FlashMessage, Job, PR, Panel, Repo, SystemStatus,
 };
 
 /// Root application state.
@@ -27,6 +27,7 @@ pub struct App {
     pub all_repos: Vec<Repo>,
     pub all_repos_selected: usize,
     pub all_repos_filter: String,
+    #[allow(dead_code)]
     pub filter_text: String,
     pub running: bool,
     pub cancel_token: CancellationToken,
@@ -72,7 +73,9 @@ impl App {
 
     /// Full name of the currently selected repo, if any.
     pub fn selected_repo_name(&self) -> Option<&str> {
-        self.repos.get(self.selected_repo).map(|r| r.full_name.as_str())
+        self.repos
+            .get(self.selected_repo)
+            .map(|r| r.full_name.as_str())
     }
 
     /// PRs for the currently selected repo (empty slice if none).
@@ -127,11 +130,7 @@ impl App {
             })
             .cloned()
             .map(|mut r| {
-                r.pr_count = self
-                    .prs
-                    .get(&r.full_name)
-                    .map(|v| v.len())
-                    .unwrap_or(0);
+                r.pr_count = self.prs.get(&r.full_name).map(|v| v.len()).unwrap_or(0);
                 r
             })
             .collect();
@@ -169,11 +168,15 @@ impl App {
         match result {
             ActionResult::PrMerged { repo, number } => {
                 self.remove_pr(&repo, number);
-                self.flash = Some(FlashMessage::success(format!("Merged PR #{number} in {repo}")));
+                self.flash = Some(FlashMessage::success(format!(
+                    "Merged PR #{number} in {repo}"
+                )));
             }
             ActionResult::PrClosed { repo, number } => {
                 self.remove_pr(&repo, number);
-                self.flash = Some(FlashMessage::success(format!("Closed PR #{number} in {repo}")));
+                self.flash = Some(FlashMessage::success(format!(
+                    "Closed PR #{number} in {repo}"
+                )));
             }
             ActionResult::AllSafeMerged { repo, count } => {
                 self.flash = Some(FlashMessage::success(format!(
@@ -280,8 +283,7 @@ impl App {
         match self.focused_panel {
             Panel::Sidebar => {
                 if !self.repos.is_empty() {
-                    self.selected_repo =
-                        (self.selected_repo + half).min(self.repos.len() - 1);
+                    self.selected_repo = (self.selected_repo + half).min(self.repos.len() - 1);
                     self.selected_pr = 0;
                 }
             }
@@ -336,10 +338,7 @@ impl App {
             .await;
 
             let action = match result {
-                Ok(()) => ActionResult::PrMerged {
-                    repo,
-                    number,
-                },
+                Ok(()) => ActionResult::PrMerged { repo, number },
                 Err(e) => ActionResult::Error(format!("Merge PR #{number}: {e}")),
             };
             let _ = tx.send(action).await;
@@ -360,10 +359,7 @@ impl App {
             .await;
 
             let action = match result {
-                Ok(()) => ActionResult::PrClosed {
-                    repo,
-                    number,
-                },
+                Ok(()) => ActionResult::PrClosed { repo, number },
                 Err(e) => ActionResult::Error(format!("Close PR #{number}: {e}")),
             };
             let _ = tx.send(action).await;
@@ -524,9 +520,21 @@ mod tests {
     async fn navigation_down_up() {
         let mut app = make_test_app();
         app.repos = vec![
-            Repo { full_name: "org/a".into(), name: "a".into(), pr_count: 1 },
-            Repo { full_name: "org/b".into(), name: "b".into(), pr_count: 1 },
-            Repo { full_name: "org/c".into(), name: "c".into(), pr_count: 1 },
+            Repo {
+                full_name: "org/a".into(),
+                name: "a".into(),
+                pr_count: 1,
+            },
+            Repo {
+                full_name: "org/b".into(),
+                name: "b".into(),
+                pr_count: 1,
+            },
+            Repo {
+                full_name: "org/c".into(),
+                name: "c".into(),
+                pr_count: 1,
+            },
         ];
         assert_eq!(app.selected_repo, 0);
 
@@ -596,9 +604,21 @@ mod tests {
     async fn half_page_clamps_to_bounds() {
         let mut app = make_test_app();
         app.repos = vec![
-            Repo { full_name: "org/a".into(), name: "a".into(), pr_count: 1 },
-            Repo { full_name: "org/b".into(), name: "b".into(), pr_count: 1 },
-            Repo { full_name: "org/c".into(), name: "c".into(), pr_count: 1 },
+            Repo {
+                full_name: "org/a".into(),
+                name: "a".into(),
+                pr_count: 1,
+            },
+            Repo {
+                full_name: "org/b".into(),
+                name: "b".into(),
+                pr_count: 1,
+            },
+            Repo {
+                full_name: "org/c".into(),
+                name: "c".into(),
+                pr_count: 1,
+            },
         ];
 
         app.half_page_down(20); // half = 10, should clamp to 2

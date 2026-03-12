@@ -136,6 +136,7 @@ impl fmt::Display for UpdateType {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SystemStatus {
     pub version: String,
     pub boot_time: DateTime<Utc>,
@@ -147,6 +148,7 @@ pub struct SystemStatus {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Job {
     pub id: String,
     pub repo: String,
@@ -323,10 +325,7 @@ mod tests {
 
     #[test]
     fn classify_from_title_no_match() {
-        assert_eq!(
-            UpdateType::classify_title("Update dependencies"),
-            None
-        );
+        assert_eq!(UpdateType::classify_title("Update dependencies"), None);
     }
 
     #[test]
@@ -390,11 +389,7 @@ mod tests {
         assert!(!pr.is_safe());
     }
 
-    fn make_pr(
-        update_type: UpdateType,
-        mergeable: Option<bool>,
-        checks_pass: Option<bool>,
-    ) -> PR {
+    fn make_pr(update_type: UpdateType, mergeable: Option<bool>, checks_pass: Option<bool>) -> PR {
         PR {
             number: 1,
             title: "test".into(),

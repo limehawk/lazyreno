@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
-use ratatui::Frame;
 
+use super::theme::Theme;
 use crate::app::App;
 use crate::types::{Panel, UpdateType};
-use super::theme::Theme;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let focused = app.focused_panel == Panel::PrTable;
@@ -16,9 +16,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         theme.border_unfocused
     };
 
-    let repo_name = app
-        .selected_repo_name()
-        .unwrap_or("—");
+    let repo_name = app.selected_repo_name().unwrap_or("—");
     let prs = app.current_prs();
     let title = format!(" PRs — {} ({}) ", repo_name, prs.len());
 
@@ -77,7 +75,10 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
                 Cell::from(Span::styled(pr.update_type.to_string(), type_style)),
                 Cell::from(Span::styled(checks_text, checks_style)),
                 Cell::from(Span::styled(merge_text, merge_style)),
-                Cell::from(Span::styled(pr.age_display(), Style::default().fg(theme.muted))),
+                Cell::from(Span::styled(
+                    pr.age_display(),
+                    Style::default().fg(theme.muted),
+                )),
             ]);
 
             if selected {
@@ -101,9 +102,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         Constraint::Length(5),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(block);
+    let table = Table::new(rows, widths).header(header).block(block);
 
     frame.render_widget(table, area);
 }

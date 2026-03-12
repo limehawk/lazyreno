@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
-use octocrab::params;
 use octocrab::Octocrab;
+use octocrab::params;
 use serde::Deserialize;
 
 use crate::types::{PR, Repo, UpdateType};
 
 /// Minimal combined-status response for commit status checks.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CombinedStatus {
     state: String,
 }
@@ -120,7 +121,7 @@ impl GithubClient {
                         .unwrap_or_default(),
                     created_at: pr.created_at.unwrap_or_else(chrono::Utc::now),
                     update_type,
-                    mergeable: None,  // requires individual PR fetch
+                    mergeable: None,   // requires individual PR fetch
                     checks_pass: None, // requires separate status call
                 }
             })
@@ -130,6 +131,7 @@ impl GithubClient {
     }
 
     /// Check if all combined commit statuses pass for a given SHA.
+    #[allow(dead_code)]
     pub async fn get_checks_pass(&self, repo_name: &str, sha: &str) -> Result<bool> {
         let (owner, repo) = self.split_repo(repo_name);
         let url = format!("/repos/{}/{}/commits/{}/status", owner, repo, sha);

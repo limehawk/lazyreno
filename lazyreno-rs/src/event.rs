@@ -10,9 +10,10 @@ use crate::types::{ActionResult, FetchResult};
 /// into a single stream the main loop can select on.
 pub enum AppEvent {
     Key(KeyEvent),
+    #[allow(dead_code)]
     Resize(u16, u16),
     Tick,
-    FetchComplete(FetchResult),
+    FetchComplete(Box<FetchResult>),
     ActionComplete(ActionResult),
 }
 
@@ -75,7 +76,7 @@ impl EventHandler {
             tokio::spawn(async move {
                 let mut fetch_rx = fetch_rx;
                 while let Some(result) = fetch_rx.recv().await {
-                    if tx.send(AppEvent::FetchComplete(result)).is_err() {
+                    if tx.send(AppEvent::FetchComplete(Box::new(result))).is_err() {
                         break;
                     }
                 }

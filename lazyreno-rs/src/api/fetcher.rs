@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -53,8 +53,7 @@ async fn fetch_all(github: Arc<GithubClient>, renovate: &RenovateClient) -> Fetc
     };
 
     // 3. Fetch status and jobs (independent, can run concurrently)
-    let (status_result, jobs_result) =
-        tokio::join!(renovate.get_status(), renovate.get_jobs());
+    let (status_result, jobs_result) = tokio::join!(renovate.get_status(), renovate.get_jobs());
 
     FetchResult {
         repos: repos_result,

@@ -1,11 +1,11 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem};
-use ratatui::Frame;
 
-use crate::app::App;
 use super::theme::Theme;
+use crate::app::App;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     frame.render_widget(Clear, area);
@@ -14,9 +14,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let filtered: Vec<(usize, &crate::types::Repo)> = app
         .all_repos
         .iter()
-        .filter(|r| {
-            filter.is_empty() || r.full_name.to_lowercase().contains(&filter)
-        })
+        .filter(|r| filter.is_empty() || r.full_name.to_lowercase().contains(&filter))
         .enumerate()
         .collect();
 
@@ -24,10 +22,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let title = if app.all_repos_filter.is_empty() {
         format!(" All Repos ({}) ", count)
     } else {
-        format!(
-            " All Repos — filter: {} ({}) ",
-            app.all_repos_filter, count
-        )
+        format!(" All Repos — filter: {} ({}) ", app.all_repos_filter, count)
     };
 
     let block = Block::default()
@@ -38,11 +33,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let items: Vec<ListItem> = filtered
         .iter()
         .map(|(i, repo)| {
-            let pr_count = app
-                .prs
-                .get(&repo.full_name)
-                .map(|v| v.len())
-                .unwrap_or(0);
+            let pr_count = app.prs.get(&repo.full_name).map(|v| v.len()).unwrap_or(0);
             let text = format!("{} ({} PRs)", repo.full_name, pr_count);
             let style = if *i == app.all_repos_selected {
                 Style::default()
