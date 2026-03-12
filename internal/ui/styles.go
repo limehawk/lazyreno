@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -31,8 +31,6 @@ var (
 	ErrorText   lipgloss.Style
 	WarningText lipgloss.Style
 	SuccessText lipgloss.Style
-	ActiveTab   lipgloss.Style
-	InactiveTab lipgloss.Style
 	ActiveBorder   lipgloss.Style
 	InactiveBorder lipgloss.Style
 	ShortcutKey    lipgloss.Style
@@ -71,13 +69,6 @@ func init() {
 	WarningText = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	SuccessText = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
-	ActiveTab = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(Accent).
-		Padding(0, 1)
-
-	InactiveTab = Dim.Padding(0, 1)
-
 	ActiveBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Accent).
@@ -89,26 +80,6 @@ func init() {
 		Padding(0, 1)
 
 	ShortcutKey = lipgloss.NewStyle().Foreground(SecondAccent).Bold(true)
-}
-
-// HuhTheme returns a huh form theme using the btop theme colors.
-func HuhTheme(isDark bool) *huh.Styles {
-	t := huh.ThemeBase(isDark)
-
-	t.Focused.Base = t.Focused.Base.BorderForeground(Border)
-	t.Focused.Title = t.Focused.Title.Foreground(Accent).Bold(true)
-	t.Focused.Description = Dim
-	t.Focused.FocusedButton = lipgloss.NewStyle().
-		Padding(0, 2).MarginRight(1).
-		Foreground(SelectedFG).Background(Accent).Bold(true)
-	t.Focused.BlurredButton = lipgloss.NewStyle().
-		Padding(0, 2).MarginRight(1).
-		Foreground(Text).Background(SelectedBG)
-
-	t.Blurred = t.Focused
-	t.Blurred.Base = t.Blurred.Base.BorderStyle(lipgloss.HiddenBorder())
-
-	return t
 }
 
 // PanelBorder returns the border style for a panel.
@@ -125,6 +96,57 @@ func PanelTitle(title string, focused bool) string {
 		return lipgloss.NewStyle().Foreground(Title).Bold(true).Render(title)
 	}
 	return Dim.Render(title)
+}
+
+// PRStatusDot returns a colored dot indicating PR merge readiness.
+func PRStatusDot(checksPass, mergeable bool) string {
+	switch {
+	case checksPass && mergeable:
+		return SuccessText.Render("●")
+	case !checksPass:
+		return ErrorText.Render("●")
+	default: // !mergeable
+		return WarningText.Render("●")
+	}
+}
+
+// PRTypeStyle returns a styled update type string.
+func PRTypeStyle(updateType string) string {
+	switch updateType {
+	case "major":
+		return ErrorText.Render(updateType)
+	case "minor":
+		return WarningText.Render(updateType)
+	default:
+		return Dim.Render(updateType)
+	}
+}
+
+// JobStatusDot returns a colored dot for job status.
+func JobStatusDot(status string) string {
+	switch status {
+	case "success":
+		return SuccessText.Render("●")
+	case "failed":
+		return ErrorText.Render("●")
+	case "running":
+		return WarningText.Render("◌")
+	default: // pending, queued
+		return Dim.Render("○")
+	}
+}
+
+// PRAgeForeground returns a color based on PR age.
+func PRAgeForeground(created time.Time) color.Color {
+	d := time.Since(created)
+	switch {
+	case d < 24*time.Hour:
+		return lipgloss.Color("2") // green
+	case d < 3*24*time.Hour:
+		return lipgloss.Color("3") // yellow
+	default:
+		return lipgloss.Color("1") // red
+	}
 }
 
 // loadBtopTheme parses ~/.config/omarchy/current/theme/btop.theme.

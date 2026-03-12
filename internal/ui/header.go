@@ -2,18 +2,21 @@ package ui
 
 import "charm.land/lipgloss/v2"
 
-var tabNames = []string{"PRs", "Repos"}
-
-func RenderHeader(activeTab int, width int) string {
-	var tabs []string
-	for i, name := range tabNames {
-		label := "[" + string(rune('1'+i)) + "] " + name
-		if i == activeTab {
-			tabs = append(tabs, ActiveTab.Render(label))
-		} else {
-			tabs = append(tabs, InactiveTab.Render(label))
-		}
+func RenderStatusBar(spinnerView string, repoInfo string, lastUpdated string, width int) string {
+	left := Bold.Render("lazyreno")
+	if spinnerView != "" {
+		left += " " + spinnerView
 	}
-	row := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
-	return lipgloss.NewStyle().Width(width).Render(row)
+	if repoInfo != "" {
+		left += "  " + repoInfo
+	}
+	right := Dim.Render(lastUpdated)
+
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	spacer := lipgloss.NewStyle().Width(gap).Render("")
+	bar := lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
+	return lipgloss.NewStyle().Width(width).Render(bar)
 }

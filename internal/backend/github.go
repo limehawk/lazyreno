@@ -3,8 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"strings"
+"strings"
 	"time"
 
 	"github.com/google/go-github/v84/github"
@@ -12,11 +11,9 @@ import (
 
 type GitHubClient struct {
 	client *github.Client
-	ctx    context.Context
 }
 
 func NewGitHubClient(token string, baseURL ...string) *GitHubClient {
-	ctx := context.Background()
 	client := github.NewClient(nil).WithAuthToken(token)
 
 	if len(baseURL) > 0 && baseURL[0] != "" {
@@ -24,16 +21,20 @@ func NewGitHubClient(token string, baseURL ...string) *GitHubClient {
 		client, _ = client.WithEnterpriseURLs(baseURL[0]+"/", baseURL[0]+"/")
 	}
 
-	return &GitHubClient{client: client, ctx: ctx}
+	return &GitHubClient{client: client}
 }
 
 func (g *GitHubClient) ListOpenPRs(owner, repo string) ([]PR, error) {
+	return g.ListOpenPRsWithContext(context.Background(), owner, repo)
+}
+
+func (g *GitHubClient) ListOpenPRsWithContext(ctx context.Context, owner, repo string) ([]PR, error) {
 	opts := &github.PullRequestListOptions{
 		State:       "open",
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 
-	ghPRs, _, err := g.client.PullRequests.List(g.ctx, owner, repo, opts)
+	ghPRs, _, err := g.client.PullRequests.List(ctx, owner, repo, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -62,14 +63,18 @@ func (g *GitHubClient) ListOpenPRs(owner, repo string) ([]PR, error) {
 }
 
 func (g *GitHubClient) GetPRMergeability(owner, repo string, number int) (mergeable bool, checksPass bool, err error) {
-	pr, _, err := g.client.PullRequests.Get(g.ctx, owner, repo, number)
+	return g.GetPRMergeabilityWithContext(context.Background(), owner, repo, number)
+}
+
+func (g *GitHubClient) GetPRMergeabilityWithContext(ctx context.Context, owner, repo string, number int) (mergeable bool, checksPass bool, err error) {
+	pr, _, err := g.client.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		return false, false, err
 	}
 	mergeable = pr.GetMergeable()
 
 	// Check combined status
-	statuses, _, err := g.client.Repositories.GetCombinedStatus(g.ctx, owner, repo, pr.GetHead().GetRef(), nil)
+	statuses, _, err := g.client.Repositories.GetCombinedStatus(ctx, owner, repo, pr.GetHead().GetRef(), nil)
 	if err != nil {
 		return mergeable, false, nil // non-fatal
 	}
@@ -79,15 +84,23 @@ func (g *GitHubClient) GetPRMergeability(owner, repo string, number int) (mergea
 }
 
 func (g *GitHubClient) MergePR(owner, repo string, number int) error {
-	_, _, err := g.client.PullRequests.Merge(g.ctx, owner, repo, number, "", &github.PullRequestOptions{
+	return g.MergePRWithContext(context.Background(), owner, repo, number)
+}
+
+func (g *GitHubClient) MergePRWithContext(ctx context.Context, owner, repo string, number int) error {
+	_, _, err := g.client.PullRequests.Merge(ctx, owner, repo, number, "", &github.PullRequestOptions{
 		MergeMethod: "merge",
 	})
 	return err
 }
 
 func (g *GitHubClient) ClosePR(owner, repo string, number int, branch string) error {
+	return g.ClosePRWithContext(context.Background(), owner, repo, number, branch)
+}
+
+func (g *GitHubClient) ClosePRWithContext(ctx context.Context, owner, repo string, number int, branch string) error {
 	state := "closed"
-	_, _, err := g.client.PullRequests.Edit(g.ctx, owner, repo, number, &github.PullRequest{
+	_, _, err := g.client.PullRequests.Edit(ctx, owner, repo, number, &github.PullRequest{
 		State: &state,
 	})
 	if err != nil {
@@ -95,11 +108,15 @@ func (g *GitHubClient) ClosePR(owner, repo string, number int, branch string) er
 	}
 
 	// Delete branch — best effort
-	g.client.Git.DeleteRef(g.ctx, owner, repo, "heads/"+branch)
+	g.client.Git.DeleteRef(ctx, owner, repo, "heads/"+branch)
 	return nil
 }
 
 func (g *GitHubClient) ListOwnerRepos(owner string) ([]string, error) {
+	return g.ListOwnerReposWithContext(context.Background(), owner)
+}
+
+func (g *GitHubClient) ListOwnerReposWithContext(ctx context.Context, owner string) ([]string, error) {
 	opts := &github.RepositoryListByUserOptions{
 		Type:        "sources",
 		ListOptions: github.ListOptions{PerPage: 100},
@@ -107,7 +124,7 @@ func (g *GitHubClient) ListOwnerRepos(owner string) ([]string, error) {
 
 	var allRepos []string
 	for {
-		repos, resp, err := g.client.Repositories.ListByUser(g.ctx, owner, opts)
+		repos, resp, err := g.client.Repositories.ListByUser(ctx, owner, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -173,10 +190,4 @@ func RelativeTime(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 	}
-}
-
-// OpenInBrowser opens a URL in the default browser.
-func OpenInBrowser(url string) *http.Request {
-	// This is a placeholder — the actual browser opening is handled by the TUI.
-	return nil
 }

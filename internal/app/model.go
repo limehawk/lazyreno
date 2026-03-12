@@ -7,61 +7,66 @@ import (
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/limehawk/lazyreno/internal/backend"
 	"github.com/limehawk/lazyreno/internal/config"
 	"github.com/limehawk/lazyreno/internal/ui"
 )
 
-const (
-	TabPRs   = 0
-	TabRepos = 1
-	tabCount = 2
-)
-
 type Model struct {
 	cfg      *config.Config
 	renovate *backend.RenovateClient
 	github   *backend.GitHubClient
-	cache    *backend.Cache
-
-	activeTab int
-	width     int
-	height    int
+	width  int
+	height int
 
 	// Shared data
 	repos          []string
 	prs            []backend.PR
+	prsByRepo      map[string][]backend.PR // indexed on PR fetch completion
 	pendingPRs     []backend.PR
-	pendingPRCount int // number of PR fetch responses expected
+	pendingPRCount int
+	prBatchQueue   [][]string // remaining batches to fetch
 	status         *backend.SystemStatus
+	jobs           []backend.Job
 
-	// Filtered PRs for the currently selected repo (maps to prTable rows).
+	// Filtered PRs for the currently selected repo.
 	filteredPRs []backend.PR
 
 	// UI state
-	keys         KeyMap
-	help         help.Model
-	confirmForm  *huh.Form
-	confirmFn    func() tea.Cmd
-	confirmed    *bool
-	flashText    string
-	flashIsError bool
-	flashExpiry  time.Time
-	focusedPanel int // 0=sidebar, 1=main, 2=detail
+	keys          KeyMap
+	help          help.Model
+	spinner       spinner.Model
+	lastUpdate    time.Time
+	showRepos     bool // overlay toggle
+	confirmText   string
+	confirmAction func() tea.Cmd
+	flashText     string
+	flashIsError  bool
+	flashExpiry   time.Time
+	focusedPanel  int // 0=sidebar, 1=table, 2=detail
 
-	// Sidebar lists (use default delegate)
-	repoList    list.Model // PRs tab sidebar
-	allRepoList list.Model // Repos tab sidebar
+	// Cached layout (recalculated on WindowSizeMsg and help toggle)
+	cachedSidebarW int
+	cachedRightW   int
+	cachedDetailW  int
+	cachedSystemW  int
+	cachedJobsW    int
 
-	// PR table (main panel on PRs tab)
+	// Sidebar: repos with open PRs
+	repoList list.Model
+
+	// All repos overlay
+	allRepoList list.Model
+
+	// PR table (right column, top)
 	prTable table.Model
 
-	// Detail viewport
+	// Detail viewport (right column, bottom-left bento panel)
 	detailView viewport.Model
 
 	err error
@@ -99,7 +104,6 @@ func newSidebarList(title string) list.Model {
 	return l
 }
 
-// newPRTable creates the table for the PR list.
 func newPRTable() table.Model {
 	cols := []table.Column{
 		{Title: "", Width: 3},
@@ -115,7 +119,6 @@ func newPRTable() table.Model {
 	)
 }
 
-// prTableStyles builds table.Styles from theme colors.
 func prTableStyles() table.Styles {
 	return table.Styles{
 		Header: lipgloss.NewStyle().
@@ -129,9 +132,7 @@ func prTableStyles() table.Styles {
 			Padding(0, 1),
 		Selected: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ui.SelectedFG).
-			Background(ui.SelectedBG).
-			Padding(0, 1),
+			Foreground(ui.Accent),
 	}
 }
 
@@ -147,24 +148,28 @@ func NewModel(cfg *config.Config) Model {
 	}
 
 	h := help.New()
-	s := help.DefaultDarkStyles()
-	s.ShortKey = ui.ShortcutKey
-	s.FullKey = ui.ShortcutKey
-	s.ShortDesc = ui.Dim
-	s.ShortSeparator = lipgloss.NewStyle().Foreground(ui.Border)
-	h.Styles = s
+	hs := help.DefaultDarkStyles()
+	hs.ShortKey = ui.ShortcutKey
+	hs.FullKey = ui.ShortcutKey
+	hs.ShortDesc = ui.Dim
+	hs.ShortSeparator = lipgloss.NewStyle().Foreground(ui.Border)
+	h.Styles = hs
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(ui.Accent)
 
 	return Model{
 		cfg:         cfg,
 		renovate:    renovate,
 		github:      gh,
-		cache:       backend.NewCache(30 * time.Second),
 		keys:        GlobalKeys,
 		help:        h,
+		spinner:     sp,
 		repoList:    newSidebarList("Repos"),
 		allRepoList: newSidebarList("Repos"),
 		prTable:     newPRTable(),
-		detailView: viewport.New(),
+		detailView:  viewport.New(),
 	}
 }
 
@@ -172,7 +177,9 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.fetchRepos(),
 		m.fetchStatus(),
+		m.fetchJobQueue(),
 		m.tickCmd(),
+		m.spinner.Tick,
 	)
 }
 
@@ -197,8 +204,8 @@ func (m Model) getSafePRsForSelectedRepo() []backend.PR {
 	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
 
 	var safe []backend.PR
-	for _, pr := range m.prs {
-		if pr.Repo == fullName && backend.IsSafeToMerge(pr) {
+	for _, pr := range m.prsByRepo[fullName] {
+		if backend.IsSafeToMerge(pr) {
 			safe = append(safe, pr)
 		}
 	}
@@ -249,7 +256,7 @@ func (m *Model) rebuildRepoList() tea.Cmd {
 		fullName := m.cfg.GitHub.Owner + "/" + repo
 		items[i] = RepoItem{Name: repo, PRCount: len(prsByRepo[fullName])}
 	}
-	m.repoList.Title = fmt.Sprintf("Repos (%d open)", len(items))
+	m.repoList.Title = fmt.Sprintf("Repos (%d)", len(items))
 	cmd := m.repoList.SetItems(items)
 	if prevIdx < len(items) {
 		m.repoList.Select(prevIdx)
@@ -273,39 +280,46 @@ func (m *Model) rebuildPRTable() {
 	fullName := m.cfg.GitHub.Owner + "/" + ri.Name
 
 	prevCursor := m.prTable.Cursor()
-	m.filteredPRs = nil
-	for _, pr := range m.prs {
-		if pr.Repo == fullName {
-			m.filteredPRs = append(m.filteredPRs, pr)
-		}
-	}
+	m.filteredPRs = m.prsByRepo[fullName]
 
-	rows := make([]table.Row, len(m.filteredPRs))
-	for i, pr := range m.filteredPRs {
-		rows[i] = prToRow(pr)
-	}
-	m.prTable.SetRows(rows)
-	if prevCursor < len(rows) {
+	if prevCursor < len(m.filteredPRs) {
 		m.prTable.SetCursor(prevCursor)
 	}
+	m.stampPRTableCursor()
 }
 
-func prToRow(pr backend.PR) table.Row {
-	status := "  "
-	if pr.ChecksPass && pr.Mergeable {
-		status = "ok"
-	} else if !pr.ChecksPass {
-		status = "!!"
-	} else if !pr.Mergeable {
-		status = "xx"
+func prToRow(pr backend.PR, selected bool) table.Row {
+	dot := ui.PRStatusDot(pr.ChecksPass, pr.Mergeable)
+	indicator := "  " + dot
+	if selected {
+		indicator = ui.AccentText.Render("▸") + " " + dot
+	}
+
+	title := pr.Title
+	if backend.IsSafeToMerge(pr) {
+		title = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true).Render(title)
 	}
 
 	updateType := pr.UpdateType
 	if updateType == "" {
 		updateType = "dep"
 	}
+	updateType = ui.PRTypeStyle(updateType)
 
-	return table.Row{status, pr.Title, updateType, backend.RelativeTime(pr.CreatedAt)}
+	age := backend.RelativeTime(pr.CreatedAt)
+	ageStyle := lipgloss.NewStyle().Foreground(ui.PRAgeForeground(pr.CreatedAt))
+	age = ageStyle.Render(age)
+
+	return table.Row{indicator, title, updateType, age}
+}
+
+func (m *Model) stampPRTableCursor() {
+	cursor := m.prTable.Cursor()
+	rows := make([]table.Row, len(m.filteredPRs))
+	for i, pr := range m.filteredPRs {
+		rows[i] = prToRow(pr, i == cursor)
+	}
+	m.prTable.SetRows(rows)
 }
 
 func (m *Model) rebuildAllRepoList() tea.Cmd {
@@ -314,14 +328,13 @@ func (m *Model) rebuildAllRepoList() tea.Cmd {
 	for i, repo := range m.repos {
 		items[i] = AllRepoItem{Name: repo}
 	}
-	m.allRepoList.Title = fmt.Sprintf("Repos (%d)", len(items))
+	m.allRepoList.Title = fmt.Sprintf("All Repos (%d)", len(items))
 	cmd := m.allRepoList.SetItems(items)
 	if prevIdx < len(items) {
 		m.allRepoList.Select(prevIdx)
 	}
 	return cmd
 }
-
 
 func (m *Model) updateDetailView() {
 	pr := m.getSelectedPR()
@@ -330,24 +343,24 @@ func (m *Model) updateDetailView() {
 		return
 	}
 
-	mergeStatus := ui.ErrorText.Render("!! conflict")
-	if pr.Mergeable {
-		mergeStatus = ui.SuccessText.Render("ok mergeable")
+	checkDot := ui.PRStatusDot(pr.ChecksPass, true)
+	checkLabel := "passing"
+	if !pr.ChecksPass {
+		checkLabel = "failing"
 	}
-	checkStatus := ui.ErrorText.Render("!! failing")
-	if pr.ChecksPass {
-		checkStatus = ui.SuccessText.Render("ok passing")
+	mergeDot := ui.PRStatusDot(true, pr.Mergeable)
+	mergeLabel := "mergeable"
+	if !pr.Mergeable {
+		mergeDot = ui.PRStatusDot(true, false)
+		mergeLabel = "conflict"
 	}
 
-	content := fmt.Sprintf("%s\n\n%s\n\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n%s %s\n\n%s merge  %s close\n%s open in browser",
+	content := fmt.Sprintf("%s  %s\n%s → %s\n%s %s  %s %s\n%s  %s\n\n%s merge  %s close  %s open",
 		ui.Bold.Render(fmt.Sprintf("#%d", pr.Number)),
 		pr.Title,
-		ui.Dim.Render("Branch:"), pr.Branch,
-		ui.Dim.Render("Base:  "), pr.Base,
-		ui.Dim.Render("Checks:"), checkStatus,
-		ui.Dim.Render("Merge: "), mergeStatus,
-		ui.Dim.Render("Age:   "), backend.RelativeTime(pr.CreatedAt),
-		ui.Dim.Render("Type:  "), pr.UpdateType,
+		ui.Dim.Render(pr.Branch), pr.Base,
+		checkDot, checkLabel, mergeDot, mergeLabel,
+		ui.PRTypeStyle(pr.UpdateType), backend.RelativeTime(pr.CreatedAt),
 		ui.ShortcutKey.Render("[m]"), ui.ShortcutKey.Render("[c]"),
 		ui.ShortcutKey.Render("[o]"),
 	)
@@ -357,38 +370,51 @@ func (m *Model) updateDetailView() {
 
 func (m Model) renderStatusBox() string {
 	if m.renovate == nil {
-		return ui.WarningText.Render("Renovate CE not configured") + "\n" +
-			ui.Dim.Render("Set LAZYRENO_RENOVATE_URL and LAZYRENO_RENOVATE_SECRET")
+		return ui.WarningText.Render("Not configured")
 	}
 	if m.status == nil {
-		return ui.Dim.Render("Connecting to Renovate CE...")
+		return ui.Dim.Render("Connecting...")
 	}
 
 	s := m.status
 	uptime := s.Uptime.Truncate(time.Minute).String()
 
-	lines := []string{
-		fmt.Sprintf("%s  %s", ui.Dim.Render("System"), ui.Bold.Render("v"+s.Version)),
-		fmt.Sprintf("%s  %s", ui.Dim.Render("Uptime"), uptime),
-		fmt.Sprintf("%s  %d", ui.Dim.Render("Queue "), s.QueueSize),
+	return fmt.Sprintf("%s %s\n%s %s\n%s %d",
+		ui.Dim.Render("CE"), ui.Bold.Render("v"+s.Version),
+		ui.Dim.Render("Up"), uptime,
+		ui.Dim.Render("Q"), s.QueueSize)
+}
+
+func (m Model) renderJobsPanel() string {
+	if len(m.jobs) == 0 && (m.status == nil || m.status.LastFinished == nil) {
+		return ui.Dim.Render("No jobs")
 	}
 
-	if s.LastFinished != nil {
-		lf := s.LastFinished
-		statusStyle := ui.SuccessText
-		if lf.Status == "failed" {
-			statusStyle = ui.ErrorText
+	var lines []string
+	for _, job := range m.jobs {
+		_, repo := splitRepo(job.Repo)
+		dot := ui.JobStatusDot(job.Status)
+		lines = append(lines, fmt.Sprintf("%s %s  %s", dot, repo, ui.Dim.Render(job.Status)))
+	}
+
+	if m.status != nil && m.status.LastFinished != nil {
+		lf := m.status.LastFinished
+		found := false
+		for _, j := range m.jobs {
+			if j.ID == lf.ID {
+				found = true
+				break
+			}
 		}
-		_, repo := splitRepo(lf.Repo)
-		jobLine := fmt.Sprintf("%s  %s", ui.Dim.Render("Last  "), repo)
-		if lf.Duration > 0 {
-			jobLine += fmt.Sprintf("  %s  %s",
-				lf.Duration.Truncate(time.Second).String(),
-				statusStyle.Render(lf.Status))
-		} else {
-			jobLine += "  " + statusStyle.Render(lf.Status)
+		if !found {
+			_, repo := splitRepo(lf.Repo)
+			dot := ui.JobStatusDot(lf.Status)
+			dur := ""
+			if lf.Duration > 0 {
+				dur = "  " + lf.Duration.Truncate(time.Second).String()
+			}
+			lines = append(lines, fmt.Sprintf("%s %s  %s%s", dot, repo, ui.Dim.Render(lf.Status), dur))
 		}
-		lines = append(lines, jobLine)
 	}
 
 	return strings.Join(lines, "\n")
@@ -400,24 +426,29 @@ func (m *Model) resizeLists() {
 		return
 	}
 
-	sidebarWidth, mainWidth, detailWidth := m.panelWidths()
+	sidebarW, rightW := m.panelWidths()
 
-	sidebarInnerW, sidebarInnerH := ui.InnerSize(sidebarWidth, bodyHeight)
-	mainInnerW, mainInnerH := ui.InnerSize(mainWidth, bodyHeight)
-
+	// Sidebar: full height
+	sidebarInnerW, sidebarInnerH := ui.InnerSize(sidebarW, bodyHeight)
 	m.repoList.SetSize(sidebarInnerW, sidebarInnerH)
-	m.allRepoList.SetSize(sidebarInnerW, sidebarInnerH)
 
-	m.prTable.SetWidth(mainInnerW)
-	m.prTable.SetHeight(mainInnerH)
-	m.updatePRTableColumns(mainInnerW)
+	// Right column: table top ~60%, bento bottom ~40%
+	tableH := bodyHeight * 60 / 100
+	bentoH := bodyHeight - tableH
 
-	if detailWidth > 0 {
-		detailInnerW, detailInnerH := ui.InnerSize(detailWidth, bodyHeight)
-		m.detailView.SetWidth(detailInnerW)
-		m.detailView.SetHeight(detailInnerH - 1) // -1 for title line
-	}
+	tableInnerW, tableInnerH := ui.InnerSize(rightW, tableH)
+	m.prTable.SetWidth(tableInnerW)
+	m.prTable.SetHeight(tableInnerH)
+	m.updatePRTableColumns(tableInnerW)
 
+	// Detail viewport in bottom-left bento panel
+	detailW, _, _ := m.bentoPanelWidths(rightW)
+	detailInnerW, detailInnerH := ui.InnerSize(detailW, bentoH)
+	m.detailView.SetWidth(detailInnerW)
+	m.detailView.SetHeight(detailInnerH - 1)
+
+	// Repos overlay
+	m.allRepoList.SetSize(m.width-4, bodyHeight-4)
 }
 
 func (m *Model) updatePRTableColumns(innerW int) {
@@ -436,8 +467,8 @@ func (m *Model) updatePRTableColumns(innerW int) {
 }
 
 func (m Model) bodyHeight() int {
-	header := ui.RenderHeader(m.activeTab, m.width)
-	helpBar := m.help.View(TabKeyMap{KeyMap: m.keys, tab: m.activeTab})
+	header := ui.RenderStatusBar("", "", m.width)
+	helpBar := m.help.View(m.keys)
 
 	var bottomLines []string
 	if m.flashText != "" && time.Now().Before(m.flashExpiry) {
@@ -453,40 +484,42 @@ func (m Model) bodyHeight() int {
 	return h
 }
 
-func (m Model) panelWidths() (sidebar, main, detail int) {
+func (m Model) panelWidths() (sidebar, right int) {
 	w := m.width
-
 	switch {
-	case w >= 180:
-		sidebar = w * 20 / 100
-		detail = w * 30 / 100
-		main = w - sidebar - detail
-	case w >= 140:
-		sidebar = w * 22 / 100
-		detail = w * 28 / 100
-		main = w - sidebar - detail
-	case w >= 100:
-		sidebar = 25
-		detail = w * 25 / 100
-		main = w - sidebar - detail
+	case w >= 160:
+		sidebar = 28
+	case w >= 120:
+		sidebar = 24
 	case w >= 80:
-		sidebar = 25
-		detail = 0
-		main = w - sidebar
+		sidebar = 22
 	default:
 		sidebar = 20
-		detail = 0
-		main = w - sidebar
 	}
+	right = w - sidebar
+	if right < 40 {
+		right = 40
+	}
+	return
+}
 
-	if sidebar < 18 {
-		sidebar = 18
+func (m *Model) recalcLayout() {
+	m.cachedSidebarW, m.cachedRightW = m.panelWidths()
+	m.cachedDetailW, m.cachedSystemW, m.cachedJobsW = m.bentoPanelWidths(m.cachedRightW)
+}
+
+func (m Model) bentoPanelWidths(rightW int) (detail, system, jobs int) {
+	detail = rightW * 45 / 100
+	system = rightW * 22 / 100
+	jobs = rightW - detail - system
+	if detail < 20 {
+		detail = 20
 	}
-	if detail > 0 && detail < 25 {
-		detail = 25
+	if system < 14 {
+		system = 14
 	}
-	if main < 20 {
-		main = 20
+	if jobs < 14 {
+		jobs = 14
 	}
 	return
 }

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -81,5 +82,21 @@ func TestGitHubClosePR(t *testing.T) {
 	}
 	if !closed {
 		t.Error("close endpoint not called")
+	}
+}
+
+func TestGitHubClientUsesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancelled immediately
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("request should not reach server with cancelled context")
+	}))
+	defer srv.Close()
+
+	client := NewGitHubClient("test-token", srv.URL)
+	_, err := client.ListOpenPRsWithContext(ctx, "limehawk", "test-repo")
+	if err == nil {
+		t.Fatal("expected error with cancelled context")
 	}
 }

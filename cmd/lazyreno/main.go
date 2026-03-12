@@ -13,6 +13,13 @@ import (
 var version = "dev"
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "\nlazyreno panicked: %v\n", r)
+			os.Exit(1)
+		}
+	}()
+
 	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
 		fmt.Println("lazyreno " + version)
 		return

@@ -39,11 +39,11 @@ type PurgeResultMsg struct {
 	Err error
 }
 
+type JobQueueFetchedMsg struct {
+	Jobs []backend.Job
+	Err  error
+}
+
 // Timer tick for background polling.
 type TickMsg struct{}
 
-// Flash message for status bar.
-type FlashMsg struct {
-	Text    string
-	IsError bool
-}

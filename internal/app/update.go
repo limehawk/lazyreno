@@ -6,9 +6,8 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/huh/v2"
-	"github.com/limehawk/lazyreno/internal/ui"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -18,68 +17,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.help.SetWidth(msg.Width)
 		m.resizeLists()
+		m.recalcLayout()
 		m.syncTableFocus()
 		return m, nil
 
 	case tea.KeyMsg:
-		// Confirmation form intercepts all messages when active
-		// (handled below in the confirmForm block)
+		// handled below
 
 	default:
 		// non-key, non-special messages fall through
 	}
 
-	// Forward messages to the confirm form when active.
-	if m.confirmForm != nil {
-		model, cmd := m.confirmForm.Update(msg)
-		m.confirmForm = model.(*huh.Form)
-		if m.confirmForm.State == huh.StateCompleted {
-			if m.confirmed != nil && *m.confirmed {
-				actionCmd := m.confirmFn()
-				m.confirmForm = nil
-				m.confirmFn = nil
-				return m, tea.Batch(cmd, actionCmd)
+	// Inline confirm intercepts next keypress.
+	if m.confirmText != "" {
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			if key.Matches(msg, key.NewBinding(key.WithKeys("y"))) {
+				action := m.confirmAction
+				m.confirmText = ""
+				m.confirmAction = nil
+				return m, action()
 			}
-			m.confirmForm = nil
-			m.confirmFn = nil
-			return m, cmd
+			m.confirmText = ""
+			m.confirmAction = nil
 		}
-		if m.confirmForm.State == huh.StateAborted {
-			m.confirmForm = nil
-			m.confirmFn = nil
-			return m, cmd
-		}
-		return m, cmd
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Repos overlay intercepts all keys when shown.
+		if m.showRepos {
+			var cmd tea.Cmd
+			if key.Matches(msg, GlobalKeys.Repos) || key.Matches(msg, GlobalKeys.Escape) || key.Matches(msg, GlobalKeys.Quit) {
+				m.showRepos = false
+				return m, nil
+			}
+			m.allRepoList, cmd = m.allRepoList.Update(msg)
+			return m, cmd
+		}
+
 		switch {
 		case key.Matches(msg, GlobalKeys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, GlobalKeys.Help):
 			m.help.ShowAll = !m.help.ShowAll
 			m.resizeLists()
+			m.recalcLayout()
 			return m, nil
-		case key.Matches(msg, GlobalKeys.Tab1):
-			m.activeTab = TabPRs
-			m.focusedPanel = 0
-			m.syncTableFocus()
-			return m, nil
-		case key.Matches(msg, GlobalKeys.Tab2):
-			m.activeTab = TabRepos
-			m.focusedPanel = 0
-			m.syncTableFocus()
-			return m, nil
-		case key.Matches(msg, GlobalKeys.NextTab):
-			m.activeTab = (m.activeTab + 1) % tabCount
-			m.focusedPanel = 0
-			m.syncTableFocus()
-			return m, nil
-		case key.Matches(msg, GlobalKeys.PrevTab):
-			m.activeTab = (m.activeTab + tabCount - 1) % tabCount
-			m.focusedPanel = 0
-			m.syncTableFocus()
+		case key.Matches(msg, GlobalKeys.Repos):
+			m.showRepos = !m.showRepos
 			return m, nil
 		case key.Matches(msg, GlobalKeys.FocusNext):
 			m.focusNext()
@@ -88,11 +74,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPrev()
 			return m, nil
 		case key.Matches(msg, GlobalKeys.Refresh):
-			return m, tea.Batch(m.fetchRepos(), m.fetchStatus())
+			return m, tea.Batch(m.fetchRepos(), m.fetchStatus(), m.fetchJobQueue(), m.spinner.Tick)
 		}
 
-		// Sync/purge available globally on PRs tab (status box is always visible).
-		if m.activeTab == TabPRs && m.renovate != nil {
+		// Sync/purge available globally when renovate is configured.
+		if m.renovate != nil {
 			switch {
 			case key.Matches(msg, GlobalKeys.Sync):
 				return m, func() tea.Msg {
@@ -100,18 +86,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return SyncTriggeredMsg{Err: err}
 				}
 			case key.Matches(msg, GlobalKeys.Purge):
-				cmd := m.showConfirm("Purge all failed jobs?", func() tea.Cmd {
+				m.showConfirm("Purge all failed jobs? [y/n]", func() tea.Cmd {
 					return func() tea.Msg {
 						err := m.renovate.PurgeFailedJobs()
 						return PurgeResultMsg{Err: err}
 					}
 				})
-				return m, cmd
+				return m, nil
 			}
 		}
 
-		// Delegate to tab-specific + focused-panel handling
-		return m.updateActiveTab(msg)
+		// Delegate to focused-panel handling
+		return m.updateFocusedPanel(msg)
 
 	// Data messages
 	case ReposFetchedMsg:
@@ -120,9 +106,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.repos = msg.Repos
 			m.pendingPRs = nil
-			m.pendingPRCount = len(msg.Repos)
+			batches := makeBatches(msg.Repos, maxConcurrentFetches)
+			if len(batches) == 0 {
+				m.pendingPRCount = 0
+			} else {
+				m.pendingPRCount = len(batches[0])
+				m.prBatchQueue = batches[1:]
+			}
 			cmd1 := m.rebuildAllRepoList()
-			return m, tea.Batch(cmd1, m.fetchAllPRs())
+			if len(batches) > 0 {
+				return m, tea.Batch(cmd1, m.fetchPRBatch(batches[0]))
+			}
+			return m, cmd1
 		}
 	case PRsFetchedMsg:
 		if msg.Err != nil {
@@ -131,14 +126,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.pendingPRs = append(m.pendingPRs, msg.PRs...)
 			m.pendingPRCount--
-			if m.pendingPRCount <= 0 {
-				m.prs = m.pendingPRs
-				m.pendingPRs = nil
-				cmd1 := m.rebuildRepoList()
-				m.rebuildPRTable()
-				m.updateDetailView()
-				return m, cmd1
+		}
+		if m.pendingPRCount <= 0 {
+			if len(m.prBatchQueue) > 0 {
+				next := m.prBatchQueue[0]
+				m.prBatchQueue = m.prBatchQueue[1:]
+				m.pendingPRCount = len(next)
+				return m, m.fetchPRBatch(next)
 			}
+			m.prs = m.pendingPRs
+			m.pendingPRs = nil
+			m.prsByRepo = m.groupPRsByRepo()
+			m.lastUpdate = time.Now()
+			cmd1 := m.rebuildRepoList()
+			m.rebuildPRTable()
+			m.updateDetailView()
+			return m, cmd1
 		}
 	case SystemStatusFetchedMsg:
 		if msg.Err != nil {
@@ -146,12 +149,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = msg.Status
 		}
+	case JobQueueFetchedMsg:
+		if msg.Err != nil {
+			m.setFlash(msg.Err.Error(), true)
+		} else {
+			m.jobs = msg.Jobs
+		}
 	case MergePRResultMsg:
 		if msg.Err != nil {
 			m.setFlash("Merge failed: "+msg.Err.Error(), true)
 		} else {
 			m.setFlash(fmt.Sprintf("Merged #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
+			m.prsByRepo = m.groupPRsByRepo()
 			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
@@ -163,6 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setFlash(fmt.Sprintf("Closed #%d", msg.Number), false)
 			m.prs = removePR(m.prs, msg.Repo, msg.Number)
+			m.prsByRepo = m.groupPRsByRepo()
 			cmd1 := m.rebuildRepoList()
 			m.rebuildPRTable()
 			m.updateDetailView()
@@ -181,101 +192,74 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setFlash("Failed jobs purged", false)
 		}
 	case TickMsg:
-		// Don't clear existing data — let it stay visible while refreshing.
 		return m, tea.Batch(
 			m.fetchRepos(),
 			m.fetchStatus(),
+			m.fetchJobQueue(),
 			m.tickCmd(),
+			m.spinner.Tick,
 		)
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil
 }
 
-func (m *Model) updateActiveTab(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateFocusedPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	switch m.activeTab {
-	case TabPRs:
-		// Arrow keys for panel navigation.
-		if key.Matches(msg, GlobalKeys.Right) {
-			if m.focusedPanel < m.maxPanel() {
-				m.focusNext()
-			}
-			return m, nil
+	// Arrow keys for panel navigation.
+	if key.Matches(msg, GlobalKeys.Right) {
+		if m.focusedPanel < m.maxPanel() {
+			m.focusNext()
 		}
-		if key.Matches(msg, GlobalKeys.Left) {
-			if m.focusedPanel > 0 {
-				m.focusPrev()
-			}
-			return m, nil
+		return m, nil
+	}
+	if key.Matches(msg, GlobalKeys.Left) {
+		if m.focusedPanel > 0 {
+			m.focusPrev()
 		}
+		return m, nil
+	}
 
-		// Forward keys to the focused component.
-		if m.focusedPanel == 0 {
-			// Enter/right on sidebar selects the repo and moves to PR table.
-			if key.Matches(msg, GlobalKeys.Enter) {
-				m.focusNext()
-				return m, nil
-			}
-			prevIdx := m.repoList.Index()
-			m.repoList, cmd = m.repoList.Update(msg)
-			if m.repoList.Index() != prevIdx {
-				m.rebuildPRTable()
-				m.updateDetailView()
-			}
-			return m, cmd
-		} else if m.focusedPanel == 1 {
-			// PR-specific actions before the table consumes the key.
-			if key.Matches(msg, key.NewBinding(key.WithKeys("m", "M", "c", "o", "enter"))) {
-				return m.handlePRActions(msg)
-			}
-			prevCursor := m.prTable.Cursor()
-			m.prTable, cmd = m.prTable.Update(msg)
-			if m.prTable.Cursor() != prevCursor {
-				m.updateDetailView()
-			}
-			return m, cmd
-		} else {
-			// Detail pane: forward to viewport for scrolling.
-			m.detailView, cmd = m.detailView.Update(msg)
-			return m, cmd
-		}
-
-	case TabRepos:
-		if key.Matches(msg, GlobalKeys.Right) && m.focusedPanel < m.maxPanel() {
+	switch m.focusedPanel {
+	case 0: // sidebar
+		if key.Matches(msg, GlobalKeys.Enter) {
 			m.focusNext()
 			return m, nil
 		}
-		if key.Matches(msg, GlobalKeys.Left) && m.focusedPanel > 0 {
-			m.focusPrev()
-			return m, nil
+		prevIdx := m.repoList.Index()
+		m.repoList, cmd = m.repoList.Update(msg)
+		if m.repoList.Index() != prevIdx {
+			m.rebuildPRTable()
+			m.updateDetailView()
 		}
-		if m.focusedPanel == 0 {
-			m.allRepoList, cmd = m.allRepoList.Update(msg)
-			return m, cmd
+		return m, cmd
+	case 1: // PR table
+		if key.Matches(msg, key.NewBinding(key.WithKeys("m", "M", "c", "o", "enter"))) {
+			return m.handlePRActions(msg)
 		}
-		return m, nil
-
+		prevCursor := m.prTable.Cursor()
+		m.prTable, cmd = m.prTable.Update(msg)
+		if m.prTable.Cursor() != prevCursor {
+			m.stampPRTableCursor()
+			m.updateDetailView()
+		}
+		return m, cmd
+	case 2: // detail viewport
+		m.detailView, cmd = m.detailView.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil
 }
 
-func (m *Model) showConfirm(message string, fn func() tea.Cmd) tea.Cmd {
-	confirmed := false
-	m.confirmed = &confirmed
-	m.confirmFn = fn
-	m.confirmForm = huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title(message).
-				Affirmative("Yes").
-				Negative("No").
-				Value(m.confirmed),
-		),
-	).WithWidth(40).WithTheme(huh.ThemeFunc(ui.HuhTheme))
-	return m.confirmForm.Init()
+func (m *Model) showConfirm(message string, fn func() tea.Cmd) {
+	m.confirmText = message
+	m.confirmAction = fn
 }
 
 func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -287,14 +271,21 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("m", "enter"))):
 		pr := *selectedPR
-		cmd := m.showConfirm(fmt.Sprintf("Merge #%d into %s?", pr.Number, pr.Base), func() tea.Cmd {
+		m.showConfirm(fmt.Sprintf("Merge #%d into %s? [y/n]", pr.Number, pr.Base), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
-				err := m.github.MergePR(owner, repo, pr.Number)
+				mergeable, _, err := m.github.GetPRMergeability(owner, repo, pr.Number)
+				if err != nil {
+					return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("mergeability check failed: %w", err)}
+				}
+				if !mergeable {
+					return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("PR #%d is not mergeable", pr.Number)}
+				}
+				err = m.github.MergePR(owner, repo, pr.Number)
 				return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
 		})
-		return m, cmd
+		return m, nil
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("M"))):
 		safePRs := m.getSafePRsForSelectedRepo()
@@ -302,30 +293,37 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setFlash("No safe PRs to merge", true)
 			return m, nil
 		}
-		cmd := m.showConfirm(fmt.Sprintf("Merge %d safe PRs?", len(safePRs)), func() tea.Cmd {
+		m.showConfirm(fmt.Sprintf("Merge %d safe PRs? [y/n]", len(safePRs)), func() tea.Cmd {
 			var cmds []tea.Cmd
 			for _, pr := range safePRs {
 				pr := pr
 				cmds = append(cmds, func() tea.Msg {
 					owner, repo := splitRepo(pr.Repo)
-					err := m.github.MergePR(owner, repo, pr.Number)
+					mergeable, _, err := m.github.GetPRMergeability(owner, repo, pr.Number)
+					if err != nil {
+						return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("check failed: %w", err)}
+					}
+					if !mergeable {
+						return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: fmt.Errorf("PR #%d not mergeable", pr.Number)}
+					}
+					err = m.github.MergePR(owner, repo, pr.Number)
 					return MergePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 				})
 			}
 			return tea.Batch(cmds...)
 		})
-		return m, cmd
+		return m, nil
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("c"))):
 		pr := *selectedPR
-		cmd := m.showConfirm(fmt.Sprintf("Close #%d and delete branch?", pr.Number), func() tea.Cmd {
+		m.showConfirm(fmt.Sprintf("Close #%d and delete branch? [y/n]", pr.Number), func() tea.Cmd {
 			return func() tea.Msg {
 				owner, repo := splitRepo(pr.Repo)
 				err := m.github.ClosePR(owner, repo, pr.Number, pr.Branch)
 				return ClosePRResultMsg{Repo: pr.Repo, Number: pr.Number, Err: err}
 			}
 		})
-		return m, cmd
+		return m, nil
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("o"))):
 		return m, tea.ExecProcess(exec.Command("xdg-open", selectedPR.URL), nil)
@@ -336,7 +334,7 @@ func (m *Model) handlePRActions(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // syncTableFocus ensures the PR table focus matches the current panel state.
 func (m *Model) syncTableFocus() {
-	if m.activeTab == TabPRs && m.focusedPanel == 1 {
+	if m.focusedPanel == 1 {
 		m.prTable.Focus()
 	} else {
 		m.prTable.Blur()
@@ -344,10 +342,7 @@ func (m *Model) syncTableFocus() {
 }
 
 func (m *Model) maxPanel() int {
-	if m.activeTab == TabPRs {
-		return 2
-	}
-	return 1
+	return 2 // sidebar, table, detail
 }
 
 func (m *Model) focusNext() {
@@ -379,13 +374,23 @@ func (m Model) fetchRepos() tea.Cmd {
 	}
 }
 
-func (m Model) fetchAllPRs() tea.Cmd {
-	if m.github == nil || m.cfg.GitHub.Owner == "" {
-		return nil
-	}
+const maxConcurrentFetches = 5
 
+func makeBatches(repos []string, size int) [][]string {
+	var batches [][]string
+	for i := 0; i < len(repos); i += size {
+		end := i + size
+		if end > len(repos) {
+			end = len(repos)
+		}
+		batches = append(batches, repos[i:end])
+	}
+	return batches
+}
+
+func (m Model) fetchPRBatch(repos []string) tea.Cmd {
 	var cmds []tea.Cmd
-	for _, repo := range m.repos {
+	for _, repo := range repos {
 		repo := repo
 		cmds = append(cmds, func() tea.Msg {
 			prs, err := m.github.ListOpenPRs(m.cfg.GitHub.Owner, repo)
@@ -402,6 +407,16 @@ func (m Model) fetchStatus() tea.Cmd {
 		}
 		status, err := m.renovate.GetStatus()
 		return SystemStatusFetchedMsg{Status: status, Err: err}
+	}
+}
+
+func (m Model) fetchJobQueue() tea.Cmd {
+	return func() tea.Msg {
+		if m.renovate == nil {
+			return JobQueueFetchedMsg{Err: nil}
+		}
+		jobs, err := m.renovate.GetJobQueue()
+		return JobQueueFetchedMsg{Jobs: jobs, Err: err}
 	}
 }
 

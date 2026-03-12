@@ -139,20 +139,6 @@ func (c *RenovateClient) GetJobQueue() ([]Job, error) {
 	return jobs, nil
 }
 
-func (c *RenovateClient) GetQueueStatus() (*QueueStatus, error) {
-	resp, err := c.do("GET", "/system/v1/tasks/queue")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var qs QueueStatus
-	if err := json.NewDecoder(resp.Body).Decode(&qs); err != nil {
-		return nil, err
-	}
-	return &qs, nil
-}
-
 func (c *RenovateClient) TriggerSync() error {
 	resp, err := c.do("POST", "/system/v1/sync")
 	if err != nil {
@@ -165,15 +151,6 @@ func (c *RenovateClient) TriggerSync() error {
 	return nil
 }
 
-func (c *RenovateClient) AddJob(orgRepo string) error {
-	resp, err := c.do("POST", "/system/v1/jobs/add")
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
-	return nil
-}
-
 func (c *RenovateClient) PurgeFailedJobs() error {
 	resp, err := c.do("POST", "/system/v1/jobs/purge")
 	if err != nil {
@@ -183,66 +160,3 @@ func (c *RenovateClient) PurgeFailedJobs() error {
 	return nil
 }
 
-func (c *RenovateClient) GetOrgs() ([]string, error) {
-	resp, err := c.do("GET", "/api/v1/orgs")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var orgs []struct {
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&orgs); err != nil {
-		return nil, err
-	}
-
-	names := make([]string, len(orgs))
-	for i, o := range orgs {
-		names[i] = o.Name
-	}
-	return names, nil
-}
-
-func (c *RenovateClient) GetOrgRepos(org string) ([]string, error) {
-	resp, err := c.do("GET", fmt.Sprintf("/api/v1/orgs/%s/-/repos", org))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var repos []struct {
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-		return nil, err
-	}
-
-	names := make([]string, len(repos))
-	for i, r := range repos {
-		names[i] = r.Name
-	}
-	return names, nil
-}
-
-func (c *RenovateClient) GetJobHistory(orgRepo string) ([]Job, error) {
-	resp, err := c.do("GET", fmt.Sprintf("/api/v1/repos/%s/-/jobs", orgRepo))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var raw []struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, err
-	}
-
-	jobs := make([]Job, len(raw))
-	for i, j := range raw {
-		jobs[i] = Job{ID: j.ID, Repo: orgRepo, Status: j.Status}
-	}
-	return jobs, nil
-}

@@ -54,9 +54,3 @@ type SystemStatus struct {
 	FailedJobs   int
 	LastFinished *Job
 }
-
-// QueueStatus from /system/v1/tasks/queue.
-type QueueStatus struct {
-	Pending int
-	Running int
-}
