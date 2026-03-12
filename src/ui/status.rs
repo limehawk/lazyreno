@@ -9,7 +9,7 @@ use crate::app::App;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let block = Block::default()
-        .title(" System ")
+        .title(" Renovate ")
         .borders(Borders::ALL)
         .border_style(theme.border_unfocused);
 
