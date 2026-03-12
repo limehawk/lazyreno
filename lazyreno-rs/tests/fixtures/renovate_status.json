@@ -1,17 +1,30 @@
 {
-  "version": "39.50.0",
-  "bootTime": "2026-03-10T08:00:00Z",
-  "uptime": "1d 3h 15m",
-  "enabled": {"autodiscover": true},
-  "queueSize": 3,
-  "runningJobs": 1,
-  "failedJobs": 0,
-  "lastFinishedJob": {
-    "id": "job-001",
-    "repository": "org/backend",
-    "status": "finished",
-    "startedAt": "2026-03-11T10:00:00Z",
-    "duration": 45,
-    "trigger": "scheduled"
+  "renovateVersion": "39.50.0",
+  "bootTime": "2026-03-10 08:00:00",
+  "app": {
+    "organizationCount": 1,
+    "repositoryCount": 12
+  },
+  "jobs": {
+    "queue": {
+      "size": 3,
+      "inProgress": [
+        { "jobId": "job-run-1", "repository": "org/frontend" }
+      ]
+    },
+    "history": {
+      "processed": 42,
+      "lastFinished": {
+        "jobId": "job-001",
+        "repository": "org/backend",
+        "status": "finished",
+        "reason": "scheduled",
+        "startedAt": "2026-03-11 10:00:00",
+        "finishedAt": "2026-03-11 10:00:45"
+      }
+    }
+  },
+  "scheduler": {
+    "sync": { "cron": "0 */4 * * *" }
   }
 }
