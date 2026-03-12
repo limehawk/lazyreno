@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use octocrab::Octocrab;
-use octocrab::params;
+use chrono::{DateTime, Utc};
+use reqwest::Client;
 use serde::Deserialize;
 
 use crate::types::{PR, Repo, UpdateType};
@@ -12,19 +12,58 @@ struct CombinedStatus {
     state: String,
 }
 
+/// Minimal PR response from the GitHub REST API.
+#[derive(Debug, Deserialize)]
+struct GhPullRequest {
+    number: u64,
+    title: Option<String>,
+    html_url: Option<String>,
+    created_at: Option<DateTime<Utc>>,
+    mergeable: Option<bool>,
+    labels: Option<Vec<GhLabel>>,
+    head: GhRef,
+    base: GhRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhLabel {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhRef {
+    #[serde(rename = "ref")]
+    ref_field: String,
+}
+
 pub struct GithubClient {
-    octocrab: Octocrab,
+    client: Client,
     owner: String,
 }
 
 impl GithubClient {
     pub fn new(token: impl Into<String>, owner: impl Into<String>) -> Result<Self> {
-        let octocrab = Octocrab::builder()
-            .personal_token(token.into())
+        let client = Client::builder()
+            .user_agent("lazyreno")
+            .default_headers({
+                let mut h = reqwest::header::HeaderMap::new();
+                let val = format!("Bearer {}", token.into());
+                h.insert(
+                    reqwest::header::AUTHORIZATION,
+                    val.parse().context("invalid token")?,
+                );
+                h.insert(
+                    reqwest::header::ACCEPT,
+                    "application/vnd.github+json"
+                        .parse()
+                        .expect("static header"),
+                );
+                h
+            })
             .build()
-            .context("building octocrab client")?;
+            .context("building HTTP client")?;
         Ok(Self {
-            octocrab,
+            client,
             owner: owner.into(),
         })
     }
@@ -38,32 +77,55 @@ impl GithubClient {
         }
     }
 
-    /// List all non-archived repos for the configured owner (user).
-    /// Uses the "list repos by user" endpoint, type=sources, paginated.
-    pub async fn list_repos(&self) -> Result<Vec<Repo>> {
-        let mut repos = Vec::new();
+    /// GET a paginated list from the GitHub API, following `per_page` + `page`.
+    async fn get_paginated<T: serde::de::DeserializeOwned>(
+        &self,
+        base_url: &str,
+        separator: char,
+    ) -> Result<Vec<T>> {
+        let mut all = Vec::new();
         let mut page = 1u32;
-
         loop {
-            let url = format!(
-                "/users/{}/repos?type=sources&per_page=100&page={page}",
-                self.owner
-            );
-            let items: Vec<serde_json::Value> = self
-                .octocrab
-                .get(&url, None::<&()>)
+            let url = format!("{base_url}{separator}per_page=100&page={page}");
+            let items: Vec<T> = self
+                .client
+                .get(&url)
+                .send()
                 .await
-                .context("listing user repos")?;
-
+                .context("GitHub API request")?
+                .error_for_status()
+                .context("GitHub API error")?
+                .json()
+                .await
+                .context("parsing GitHub response")?;
             if items.is_empty() {
                 break;
             }
+            all.extend(items);
+            page += 1;
+        }
+        Ok(all)
+    }
 
-            for r in &items {
-                let archived = r.get("archived").and_then(|v| v.as_bool()).unwrap_or(false);
-                if archived {
-                    continue;
-                }
+    /// List all non-archived repos for the configured owner (user).
+    pub async fn list_repos(&self) -> Result<Vec<Repo>> {
+        let url = format!(
+            "https://api.github.com/users/{}/repos?type=sources",
+            self.owner
+        );
+        let items: Vec<serde_json::Value> = self
+            .get_paginated(&url, '&')
+            .await
+            .context("listing user repos")?;
+
+        let repos = items
+            .iter()
+            .filter(|r| {
+                !r.get("archived")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
+            .map(|r| {
                 let name = r
                     .get("name")
                     .and_then(|v| v.as_str())
@@ -74,16 +136,13 @@ impl GithubClient {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("{}/{}", self.owner, name));
-
-                repos.push(Repo {
+                Repo {
                     name,
                     full_name,
                     pr_count: 0,
-                });
-            }
-
-            page += 1;
-        }
+                }
+            })
+            .collect();
 
         Ok(repos)
     }
@@ -91,25 +150,16 @@ impl GithubClient {
     /// List open PRs for a given repo, classifying UpdateType at fetch time.
     pub async fn list_open_prs(&self, repo_name: &str) -> Result<Vec<PR>> {
         let (owner, repo) = self.split_repo(repo_name);
-
-        let page = self
-            .octocrab
-            .pulls(owner, repo)
-            .list()
-            .state(params::State::Open)
-            .per_page(100)
-            .send()
+        let url = format!(
+            "https://api.github.com/repos/{owner}/{repo}/pulls?state=open"
+        );
+        let items: Vec<GhPullRequest> = self
+            .get_paginated(&url, '&')
             .await
-            .with_context(|| format!("listing PRs for {}/{}", owner, repo))?;
+            .with_context(|| format!("listing PRs for {owner}/{repo}"))?;
 
-        let all = self
-            .octocrab
-            .all_pages(page)
-            .await
-            .with_context(|| format!("paginating PRs for {}/{}", owner, repo))?;
-
-        let full_name = format!("{}/{}", owner, repo);
-        let prs: Vec<PR> = all
+        let full_name = format!("{owner}/{repo}");
+        let prs = items
             .into_iter()
             .map(|pr| {
                 let labels: Vec<String> = pr
@@ -119,24 +169,19 @@ impl GithubClient {
                     .iter()
                     .map(|l| l.name.clone())
                     .collect();
-                let title = pr.title.clone().unwrap_or_default();
+                let title = pr.title.unwrap_or_default();
                 let update_type = UpdateType::classify(&labels, &title);
-
                 PR {
                     number: pr.number,
                     title,
                     repo: full_name.clone(),
-                    branch: pr.head.ref_field.clone(),
-                    base: pr.base.ref_field.clone(),
-                    url: pr
-                        .html_url
-                        .as_ref()
-                        .map(|u| u.to_string())
-                        .unwrap_or_default(),
-                    created_at: pr.created_at.unwrap_or_else(chrono::Utc::now),
+                    branch: pr.head.ref_field,
+                    base: pr.base.ref_field,
+                    url: pr.html_url.unwrap_or_default(),
+                    created_at: pr.created_at.unwrap_or_else(Utc::now),
                     update_type,
-                    mergeable: None,   // requires individual PR fetch
-                    checks_pass: None, // requires separate status call
+                    mergeable: None,
+                    checks_pass: None,
                 }
             })
             .collect();
@@ -148,62 +193,68 @@ impl GithubClient {
     #[allow(dead_code)]
     pub async fn get_checks_pass(&self, repo_name: &str, sha: &str) -> Result<bool> {
         let (owner, repo) = self.split_repo(repo_name);
-        let url = format!("/repos/{}/{}/commits/{}/status", owner, repo, sha);
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/commits/{sha}/status");
         let status: CombinedStatus = self
-            .octocrab
-            .get(url, None::<&()>)
-            .await
-            .context("fetching combined status")?;
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()
+            .context("fetching combined status")?
+            .json()
+            .await?;
         Ok(status.state == "success")
     }
 
     /// Check if a PR is mergeable by fetching its details.
     pub async fn check_mergeable(&self, repo_name: &str, number: u64) -> Result<bool> {
         let (owner, repo) = self.split_repo(repo_name);
-        let pr = self
-            .octocrab
-            .pulls(owner, repo)
-            .get(number)
-            .await
-            .with_context(|| format!("fetching PR #{} in {}/{}", number, owner, repo))?;
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+        let pr: GhPullRequest = self
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("fetching PR #{number} in {owner}/{repo}"))?
+            .json()
+            .await?;
         Ok(pr.mergeable.unwrap_or(false))
     }
 
     /// Merge a PR using the merge method.
     pub async fn merge_pr(&self, repo_name: &str, number: u64) -> Result<()> {
         let (owner, repo) = self.split_repo(repo_name);
-        self.octocrab
-            .pulls(owner, repo)
-            .merge(number)
-            .method(params::pulls::MergeMethod::Merge)
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}/merge");
+        self.client
+            .put(&url)
+            .json(&serde_json::json!({ "merge_method": "merge" }))
             .send()
-            .await
-            .with_context(|| format!("merging PR #{} in {}/{}", number, owner, repo))?;
+            .await?
+            .error_for_status()
+            .with_context(|| format!("merging PR #{number} in {owner}/{repo}"))?;
         Ok(())
     }
 
     /// Close a PR by updating its state to Closed.
     pub async fn close_pr(&self, repo_name: &str, number: u64) -> Result<()> {
         let (owner, repo) = self.split_repo(repo_name);
-        self.octocrab
-            .pulls(owner, repo)
-            .update(number)
-            .state(params::pulls::State::Closed)
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+        self.client
+            .patch(&url)
+            .json(&serde_json::json!({ "state": "closed" }))
             .send()
-            .await
-            .with_context(|| format!("closing PR #{} in {}/{}", number, owner, repo))?;
+            .await?
+            .error_for_status()
+            .with_context(|| format!("closing PR #{number} in {owner}/{repo}"))?;
         Ok(())
     }
 
     /// Delete a branch (best-effort, errors ignored).
     pub async fn delete_branch(&self, repo_name: &str, branch: &str) -> Result<()> {
         let (owner, repo) = self.split_repo(repo_name);
-        let url = format!("/repos/{}/{}/git/refs/heads/{}", owner, repo, branch);
-        // Best-effort: ignore errors from already-deleted branches.
-        let _ = self
-            .octocrab
-            .delete::<serde_json::Value, _, _>(url, None::<&()>)
-            .await;
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/git/refs/heads/{branch}");
+        let _ = self.client.delete(&url).send().await;
         Ok(())
     }
 }
