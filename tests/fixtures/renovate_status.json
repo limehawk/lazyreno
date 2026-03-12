@@ -1,0 +1,30 @@
+{
+  "renovateVersion": "39.50.0",
+  "bootTime": "2026-03-10 08:00:00",
+  "app": {
+    "organizationCount": 1,
+    "repositoryCount": 12
+  },
+  "jobs": {
+    "queue": {
+      "size": 3,
+      "inProgress": [
+        { "jobId": "job-run-1", "repository": "org/frontend" }
+      ]
+    },
+    "history": {
+      "processed": 42,
+      "lastFinished": {
+        "jobId": "job-001",
+        "repository": "org/backend",
+        "status": "finished",
+        "reason": "scheduled",
+        "startedAt": "2026-03-11 10:00:00",
+        "finishedAt": "2026-03-11 10:00:45"
+      }
+    }
+  },
+  "scheduler": {
+    "sync": { "cron": "0 */4 * * *" }
+  }
+}

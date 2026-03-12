@@ -1,0 +1,8 @@
+{
+  "running": [
+    { "jobId": "job-002", "repository": "org/frontend" }
+  ],
+  "pending": [
+    { "jobId": "job-003", "repository": "org/infra" }
+  ]
+}
