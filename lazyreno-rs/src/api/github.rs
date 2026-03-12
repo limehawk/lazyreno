@@ -38,38 +38,52 @@ impl GithubClient {
         }
     }
 
-    /// List all non-archived repos for the configured owner (org).
+    /// List all non-archived repos for the configured owner (user).
+    /// Uses the "list repos by user" endpoint, type=sources, paginated.
     pub async fn list_repos(&self) -> Result<Vec<Repo>> {
-        let page = self
-            .octocrab
-            .orgs(&self.owner)
-            .list_repos()
-            .per_page(100)
-            .send()
-            .await
-            .context("listing org repos (first page)")?;
+        let mut repos = Vec::new();
+        let mut page = 1u32;
 
-        let all = self
-            .octocrab
-            .all_pages(page)
-            .await
-            .context("paginating org repos")?;
+        loop {
+            let url = format!(
+                "/users/{}/repos?type=sources&per_page=100&page={page}",
+                self.owner
+            );
+            let items: Vec<serde_json::Value> = self
+                .octocrab
+                .get(&url, None::<&()>)
+                .await
+                .context("listing user repos")?;
 
-        let repos: Vec<Repo> = all
-            .into_iter()
-            .filter(|r| r.archived != Some(true))
-            .map(|r| {
-                let full_name = r
-                    .full_name
-                    .clone()
-                    .unwrap_or_else(|| format!("{}/{}", self.owner, r.name));
-                Repo {
-                    name: r.name.clone(),
-                    full_name,
-                    pr_count: 0, // filled in after PR fetch
+            if items.is_empty() {
+                break;
+            }
+
+            for r in &items {
+                let archived = r.get("archived").and_then(|v| v.as_bool()).unwrap_or(false);
+                if archived {
+                    continue;
                 }
-            })
-            .collect();
+                let name = r
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let full_name = r
+                    .get("full_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{}/{}", self.owner, name));
+
+                repos.push(Repo {
+                    name,
+                    full_name,
+                    pr_count: 0,
+                });
+            }
+
+            page += 1;
+        }
 
         Ok(repos)
     }
