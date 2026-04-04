@@ -23,7 +23,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "[y]es  [n]o",
+                "[y/Enter] yes  [n/Esc] no",
                 Style::default().fg(theme.muted),
             )),
         ]

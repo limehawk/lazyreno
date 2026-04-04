@@ -66,6 +66,18 @@ pub enum UpdateType {
 }
 
 impl UpdateType {
+    /// Sort priority for merge ordering: lower = merged first.
+    pub fn merge_order(self) -> u8 {
+        match self {
+            UpdateType::Pin => 0,
+            UpdateType::Digest => 1,
+            UpdateType::Patch => 2,
+            UpdateType::Minor => 3,
+            UpdateType::Major => 4,
+            UpdateType::Unknown => 5,
+        }
+    }
+
     /// Classify from labels first, then title, defaulting to Unknown.
     pub fn classify(labels: &[String], title: &str) -> Self {
         if let Some(ut) = Self::classify_labels(labels) {
@@ -269,8 +281,8 @@ pub enum FlashLevel {
 pub enum ActionResult {
     PrMerged { repo: String, number: u64 },
     PrClosed { repo: String, number: u64 },
-    AllSafeMerged { repo: String, count: usize },
-    AllMerged { repo: String, count: usize },
+    AllSafeMerged { repo: String, count: usize, skipped: usize },
+    AllMerged { repo: String, count: usize, skipped: usize },
     SyncTriggered,
     JobsPurged,
     Error(String),

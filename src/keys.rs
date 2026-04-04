@@ -7,10 +7,10 @@ use crate::types::{ConfirmAction, Panel};
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     // 1. Confirmation dialog intercepts all input.
     if let Some(action) = app.confirming.take() {
-        if key.code == KeyCode::Char('y') {
+        if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) {
             execute_confirmed(app, action);
         }
-        // Any other key cancels — confirming is already taken/cleared.
+        // n, Esc, or any other key cancels — confirming is already taken/cleared.
         return;
     }
 
@@ -104,7 +104,10 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
                 app.confirming = Some(ConfirmAction::MergeAllSafe(repo.to_string()));
             }
         }
-        KeyCode::Char('A') if app.focused_panel == Panel::PrTable => {
+        KeyCode::Char('A')
+            if app.focused_panel == Panel::PrTable
+                || app.focused_panel == Panel::Sidebar =>
+        {
             if let Some(repo) = app.selected_repo_name() {
                 app.confirming = Some(ConfirmAction::MergeAll(repo.to_string()));
             }

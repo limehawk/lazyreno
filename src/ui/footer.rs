@@ -11,6 +11,7 @@ use crate::types::Panel;
 /// Shortcut hints at the bottom. All keys shown always; inactive ones are dimmed.
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let on_pr = app.focused_panel == Panel::PrTable;
+    let on_pr_or_sidebar = on_pr || app.focused_panel == Panel::Sidebar;
 
     let key_active = Style::default()
         .fg(theme.accent)
@@ -25,7 +26,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         ("j/k", "navigate", true),
         ("m", "merge", on_pr),
         ("M", "merge safe", on_pr),
-        ("A", "merge all", on_pr),
+        ("A", "merge all", on_pr_or_sidebar),
         ("x", "close", on_pr),
         ("o", "browser", on_pr),
         ("s", "sync", true),

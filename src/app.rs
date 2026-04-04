@@ -9,6 +9,7 @@ use crate::api::github::GithubClient;
 use crate::api::renovate::RenovateClient;
 use crate::types::{
     ActionResult, ConfirmAction, FetchResult, FlashMessage, Job, PR, Panel, Repo, SystemStatus,
+    UpdateType,
 };
 
 /// Root application state.
@@ -182,15 +183,19 @@ impl App {
                     "Closed PR #{number} in {repo}"
                 )));
             }
-            ActionResult::AllSafeMerged { repo, count } => {
-                self.flash = Some(FlashMessage::success(format!(
-                    "Merged {count} safe PRs in {repo}"
-                )));
+            ActionResult::AllSafeMerged { repo, count, skipped } => {
+                let mut msg = format!("Merged {count} safe PRs in {repo}");
+                if skipped > 0 {
+                    msg.push_str(&format!(", {skipped} not mergeable"));
+                }
+                self.flash = Some(FlashMessage::success(msg));
             }
-            ActionResult::AllMerged { repo, count } => {
-                self.flash = Some(FlashMessage::success(format!(
-                    "Merged {count} PRs in {repo}"
-                )));
+            ActionResult::AllMerged { repo, count, skipped } => {
+                let mut msg = format!("Merged {count} PRs in {repo}");
+                if skipped > 0 {
+                    msg.push_str(&format!(", {skipped} not mergeable"));
+                }
+                self.flash = Some(FlashMessage::success(msg));
             }
             ActionResult::SyncTriggered => {
                 self.flash = Some(FlashMessage::success("Renovate sync triggered"));
@@ -393,11 +398,16 @@ impl App {
         let repo_name = repo.clone();
         tokio::spawn(async move {
             let mut merged = 0usize;
+            let mut skipped = 0usize;
             let mut errors = Vec::new();
 
             for (number, repo) in &safe_prs {
-                match gh.merge_pr(repo, *number).await {
-                    Ok(()) => merged += 1,
+                match gh.check_mergeable(repo, *number).await {
+                    Ok(true) => match gh.merge_pr(repo, *number).await {
+                        Ok(()) => merged += 1,
+                        Err(e) => errors.push(format!("#{number}: {e}")),
+                    },
+                    Ok(false) => skipped += 1,
                     Err(e) => errors.push(format!("#{number}: {e}")),
                 }
             }
@@ -406,10 +416,11 @@ impl App {
                 ActionResult::AllSafeMerged {
                     repo: repo_name,
                     count: merged,
+                    skipped,
                 }
             } else {
                 ActionResult::Error(format!(
-                    "Merged {merged}, failed {}: {}",
+                    "Merged {merged}, skipped {skipped}, failed {}: {}",
                     errors.len(),
                     errors.join("; ")
                 ))
@@ -419,35 +430,52 @@ impl App {
     }
 
     /// Merge all PRs for a given repo (regardless of update type).
+    /// Order: patch → minor → major/digest/pin/unknown, then by PR number within each group.
     pub fn dispatch_merge_all(&self, repo: String) {
-        let all_prs: Vec<(u64, String)> = self
+        let mut all_prs: Vec<(u64, String, UpdateType)> = self
             .prs
             .get(&repo)
-            .map(|prs| prs.iter().map(|pr| (pr.number, pr.repo.clone())).collect())
+            .map(|prs| {
+                prs.iter()
+                    .map(|pr| (pr.number, pr.repo.clone(), pr.update_type))
+                    .collect()
+            })
             .unwrap_or_default();
+        all_prs.sort_by_key(|(number, _, ut)| (ut.merge_order(), *number));
+        let all_prs: Vec<(u64, String)> = all_prs
+            .into_iter()
+            .map(|(number, repo, _)| (number, repo))
+            .collect();
 
         let gh = self.github.clone();
         let tx = self.action_tx.clone();
         let repo_name = repo.clone();
         tokio::spawn(async move {
             let mut merged = 0usize;
+            let mut skipped = Vec::new();
             let mut errors = Vec::new();
 
             for (number, repo) in &all_prs {
-                match gh.merge_pr(repo, *number).await {
-                    Ok(()) => merged += 1,
+                match gh.check_mergeable(repo, *number).await {
+                    Ok(true) => match gh.merge_pr(repo, *number).await {
+                        Ok(()) => merged += 1,
+                        Err(e) => errors.push(format!("#{number}: {e}")),
+                    },
+                    Ok(false) => skipped.push(format!("#{number}")),
                     Err(e) => errors.push(format!("#{number}: {e}")),
                 }
             }
 
             let action = if errors.is_empty() {
                 ActionResult::AllMerged {
-                    repo: repo_name,
+                    repo: repo_name.clone(),
                     count: merged,
+                    skipped: skipped.len(),
                 }
             } else {
                 ActionResult::Error(format!(
-                    "Merged {merged}, failed {}: {}",
+                    "Merged {merged}, skipped {}, failed {}: {}",
+                    skipped.len(),
                     errors.len(),
                     errors.join("; ")
                 ))
