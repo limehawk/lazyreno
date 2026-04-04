@@ -22,6 +22,7 @@ pub struct App {
     pub system_status: Option<SystemStatus>,
     pub jobs: Vec<Job>,
     pub flash: Option<FlashMessage>,
+    pub activity_log: Vec<FlashMessage>,
     pub confirming: Option<ConfirmAction>,
     pub show_help: bool,
     pub show_all_repos: bool,
@@ -54,6 +55,7 @@ impl App {
             system_status: None,
             jobs: Vec::new(),
             flash: None,
+            activity_log: Vec::new(),
             confirming: None,
             show_help: false,
             show_all_repos: false,
@@ -168,18 +170,24 @@ impl App {
     // State update from action results
     // -----------------------------------------------------------------------
 
+    /// Set flash and append to activity log.
+    fn log_flash(&mut self, flash: FlashMessage) {
+        self.activity_log.push(flash.clone());
+        self.flash = Some(flash);
+    }
+
     /// Apply a completed user action to app state.
     pub fn apply_action(&mut self, result: ActionResult) {
         match result {
             ActionResult::PrMerged { repo, number } => {
                 self.remove_pr(&repo, number);
-                self.flash = Some(FlashMessage::success(format!(
+                self.log_flash(FlashMessage::success(format!(
                     "Merged PR #{number} in {repo}"
                 )));
             }
             ActionResult::PrClosed { repo, number } => {
                 self.remove_pr(&repo, number);
-                self.flash = Some(FlashMessage::success(format!(
+                self.log_flash(FlashMessage::success(format!(
                     "Closed PR #{number} in {repo}"
                 )));
             }
@@ -188,23 +196,23 @@ impl App {
                 if skipped > 0 {
                     msg.push_str(&format!(", {skipped} not mergeable"));
                 }
-                self.flash = Some(FlashMessage::success(msg));
+                self.log_flash(FlashMessage::success(msg));
             }
             ActionResult::AllMerged { repo, count, skipped } => {
                 let mut msg = format!("Merged {count} PRs in {repo}");
                 if skipped > 0 {
                     msg.push_str(&format!(", {skipped} not mergeable"));
                 }
-                self.flash = Some(FlashMessage::success(msg));
+                self.log_flash(FlashMessage::success(msg));
             }
             ActionResult::SyncTriggered => {
-                self.flash = Some(FlashMessage::success("Renovate sync triggered"));
+                self.log_flash(FlashMessage::success("Renovate sync triggered"));
             }
             ActionResult::JobsPurged => {
-                self.flash = Some(FlashMessage::success("Finished jobs purged"));
+                self.log_flash(FlashMessage::success("Finished jobs purged"));
             }
             ActionResult::Error(msg) => {
-                self.flash = Some(FlashMessage::error(msg));
+                self.log_flash(FlashMessage::error(msg));
             }
         }
     }

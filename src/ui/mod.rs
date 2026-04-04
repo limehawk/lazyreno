@@ -1,6 +1,6 @@
+pub mod activity;
 pub mod confirm;
 pub mod detail;
-pub mod flash;
 pub mod footer;
 pub mod help;
 pub mod jobs;
@@ -21,25 +21,13 @@ use theme::Theme;
 pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let size = frame.area();
 
-    // Bottom bars: footer (always) + flash (when present).
-    // Layout: [main] [flash?] [footer]
-    let bottom_rows = if app.flash.is_some() { 2u16 } else { 1 };
+    // Bottom bar: footer only. Activity log replaced the flash bar.
     let vert = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(bottom_rows)])
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(size);
     let main_area = vert[0];
-    let bottom_area = vert[1];
-
-    let (flash_area, footer_area) = if app.flash.is_some() {
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Length(1)])
-            .split(bottom_area);
-        (Some(rows[0]), rows[1])
-    } else {
-        (None, bottom_area)
-    };
+    let footer_area = vert[1];
 
     // Loading state — show centered message before first data arrives.
     if !app.loaded {
@@ -69,13 +57,19 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let pr_table_area = mid_v[0];
     let detail_area = mid_v[1];
 
-    // Right vertical: system (20%) | jobs (80%)
+    // Right vertical: status | jobs | activity (activity matches detail height)
+    let detail_height = detail_area.height;
     let right_v = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Ratio(1, 5), Constraint::Ratio(4, 5)])
+        .constraints([
+            Constraint::Length(5),            // status
+            Constraint::Min(5),              // jobs (takes remaining)
+            Constraint::Length(detail_height), // activity = detail height
+        ])
         .split(right_area);
     let status_area = right_v[0];
     let jobs_area = right_v[1];
+    let activity_area = right_v[2];
 
     // Draw panels.
     sidebar::render(app, frame, sidebar_area, theme);
@@ -83,14 +77,10 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     detail::render(app, frame, detail_area, theme);
     status::render(app, frame, status_area, theme);
     jobs::render(app, frame, jobs_area, theme);
+    activity::render(app, frame, activity_area, theme);
 
     // Footer bar.
     footer::render(app, frame, footer_area, theme);
-
-    // Flash bar.
-    if let Some(area) = flash_area {
-        flash::render(app, frame, area, theme);
-    }
 
     // Overlays (rendered on top).
     if app.show_help {

@@ -16,17 +16,23 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         theme.border_unfocused
     };
 
-    // Inner height = area minus 2 for borders.
     let inner_height = area.height.saturating_sub(2) as usize;
     let total = app.repos.len();
     let scroll_indicator = scroll_hint(app.selected_repo, total, inner_height, theme);
 
+    let version = env!("CARGO_PKG_VERSION");
     let title = match scroll_indicator {
         Some(ref hint) => Line::from(vec![
-            Span::raw(" Repos "),
+            Span::styled(
+                format!(" lazyreno v{version} "),
+                Style::default().fg(theme.accent),
+            ),
             hint.clone(),
         ]),
-        None => Line::from(" Repos "),
+        None => Line::from(Span::styled(
+            format!(" lazyreno v{version} "),
+            Style::default().fg(theme.accent),
+        )),
     };
 
     let block = Block::default()
@@ -60,7 +66,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
 }
 
 /// Returns a scroll hint span if the list overflows the visible area.
-/// Shows ↑/↓/↕ depending on scroll position.
 fn scroll_hint(selected: usize, total: usize, visible: usize, theme: &Theme) -> Option<Span<'static>> {
     if total <= visible {
         return None;
