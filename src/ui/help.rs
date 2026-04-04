@@ -32,6 +32,7 @@ pub fn render(_app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         Line::from(Span::styled("Actions", accent)),
         Line::from(Span::styled("  m            Merge PR", plain)),
         Line::from(Span::styled("  M            Merge all safe", plain)),
+        Line::from(Span::styled("  C-m          Merge all", plain)),
         Line::from(Span::styled("  x            Close PR", plain)),
         Line::from(Span::styled("  o            Open in browser", plain)),
         Line::from(Span::styled("  s            Trigger sync", plain)),

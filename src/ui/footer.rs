@@ -25,6 +25,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         ("j/k", "navigate", true),
         ("m", "merge", on_pr),
         ("M", "merge safe", on_pr),
+        ("C-m", "merge all", on_pr),
         ("x", "close", on_pr),
         ("o", "browser", on_pr),
         ("s", "sync", true),

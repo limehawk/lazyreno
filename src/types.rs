@@ -206,6 +206,7 @@ impl Panel {
 pub enum ConfirmAction {
     MergePr(u64, String),
     MergeAllSafe(String),
+    MergeAll(String),
     ClosePr(u64, String),
     PurgeJobs,
 }
@@ -218,6 +219,9 @@ impl fmt::Display for ConfirmAction {
             }
             ConfirmAction::MergeAllSafe(repo) => {
                 write!(f, "Merge all safe PRs in {}?", repo)
+            }
+            ConfirmAction::MergeAll(repo) => {
+                write!(f, "Merge ALL PRs in {}? (including major)", repo)
             }
             ConfirmAction::ClosePr(num, repo) => {
                 write!(f, "Close PR #{} in {}?", num, repo)
@@ -266,6 +270,7 @@ pub enum ActionResult {
     PrMerged { repo: String, number: u64 },
     PrClosed { repo: String, number: u64 },
     AllSafeMerged { repo: String, count: usize },
+    AllMerged { repo: String, count: usize },
     SyncTriggered,
     JobsPurged,
     Error(String),
