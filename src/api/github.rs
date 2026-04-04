@@ -107,16 +107,27 @@ impl GithubClient {
         Ok(all)
     }
 
-    /// List all non-archived repos for the configured owner (user).
+    /// List all non-archived repos for the configured owner (user or org).
     pub async fn list_repos(&self) -> Result<Vec<Repo>> {
-        let url = format!(
-            "https://api.github.com/users/{}/repos?type=sources",
-            self.owner
-        );
+        // Use the authenticated /user/repos endpoint so private repos are
+        // included, then filter to the configured owner.
+        let url = "https://api.github.com/user/repos?type=sources".to_string();
         let items: Vec<serde_json::Value> = self
             .get_paginated(&url, '&')
             .await
-            .context("listing user repos")?;
+            .context("listing repos")?;
+
+        // Keep only repos belonging to the configured owner.
+        let items: Vec<serde_json::Value> = items
+            .into_iter()
+            .filter(|r| {
+                r.get("owner")
+                    .and_then(|o| o.get("login"))
+                    .and_then(|l| l.as_str())
+                    .map(|login| login.eq_ignore_ascii_case(&self.owner))
+                    .unwrap_or(false)
+            })
+            .collect();
 
         let repos = items
             .iter()
