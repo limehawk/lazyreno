@@ -104,10 +104,7 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
                 app.confirming = Some(ConfirmAction::MergeAllSafe(repo.to_string()));
             }
         }
-        KeyCode::Char('m')
-            if key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.focused_panel == Panel::PrTable =>
-        {
+        KeyCode::Char('A') if app.focused_panel == Panel::PrTable => {
             if let Some(repo) = app.selected_repo_name() {
                 app.confirming = Some(ConfirmAction::MergeAll(repo.to_string()));
             }
