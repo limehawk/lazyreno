@@ -218,32 +218,51 @@ impl GithubClient {
     }
 
     /// Check if a PR is mergeable by fetching its details.
+    /// GitHub computes mergeability lazily — `mergeable` may be `null` on the
+    /// first request. We retry a few times with a short delay.
     pub async fn check_mergeable(&self, repo_name: &str, number: u64) -> Result<bool> {
         let (owner, repo) = self.split_repo(repo_name);
         let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
-        let pr: GhPullRequest = self
-            .client
-            .get(&url)
-            .send()
-            .await?
-            .error_for_status()
-            .with_context(|| format!("fetching PR #{number} in {owner}/{repo}"))?
-            .json()
-            .await?;
-        Ok(pr.mergeable.unwrap_or(false))
+
+        for attempt in 0..4 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            let pr: GhPullRequest = self
+                .client
+                .get(&url)
+                .send()
+                .await?
+                .error_for_status()
+                .with_context(|| format!("fetching PR #{number} in {owner}/{repo}"))?
+                .json()
+                .await?;
+            if let Some(mergeable) = pr.mergeable {
+                return Ok(mergeable);
+            }
+        }
+        // After retries, treat unknown as not mergeable.
+        Ok(false)
     }
 
     /// Merge a PR using the merge method.
     pub async fn merge_pr(&self, repo_name: &str, number: u64) -> Result<()> {
         let (owner, repo) = self.split_repo(repo_name);
         let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}/merge");
-        self.client
+        let resp = self
+            .client
             .put(&url)
             .json(&serde_json::json!({ "merge_method": "merge" }))
             .send()
-            .await?
-            .error_for_status()
+            .await
             .with_context(|| format!("merging PR #{number} in {owner}/{repo}"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            let msg = body["message"].as_str().unwrap_or("unknown error");
+            anyhow::bail!("PR #{number} in {owner}/{repo}: {status} — {msg}");
+        }
         Ok(())
     }
 
