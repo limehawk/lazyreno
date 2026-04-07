@@ -5,4 +5,5 @@ pkg/
 *.pkg.tar.zst
 CLAUDE.md
 docs/
+playground-*
 .talismanrc

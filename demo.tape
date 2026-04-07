@@ -46,6 +46,12 @@ Sleep 1.5s
 Type "h"
 Sleep 800ms
 
+# Toggle fork visibility
+Type "f"
+Sleep 1s
+Type "f"
+Sleep 800ms
+
 # Show help overlay
 Type "?"
 Sleep 2.5s
