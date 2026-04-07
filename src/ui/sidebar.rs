@@ -35,8 +35,14 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         )),
     };
 
+    let repo_count = Line::from(Span::styled(
+        format!(" Repos ({total}) "),
+        Style::default().fg(theme.muted),
+    ));
+
     let block = Block::default()
         .title(title)
+        .title_bottom(repo_count)
         .borders(Borders::ALL)
         .border_style(border_style);
 
