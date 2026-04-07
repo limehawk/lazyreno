@@ -25,10 +25,12 @@ Renovate CE generates a flood of dependency PRs across repos. Clicking through G
 - **3-panel bento layout** — repo sidebar, PR table + detail, system status + jobs
 - **Bulk merge** — merge all safe (minor/patch, mergeable, checks passing) PRs in one keystroke
 - **PR management** — merge, close with branch cleanup, open in browser
+- **Renovate commands** — rebase, recreate, retry PRs directly from the TUI
 - **Job monitoring** — live view of running/pending Renovate jobs with queue depth
 - **System status** — Renovate version, uptime, last finished job
 - **Vim navigation** — `hjkl`, `g`/`G`, `Ctrl+u`/`Ctrl+d`, context-sensitive hints
 - **Fuzzy repo filter** — `a` opens an overlay to search across all repos
+- **Fork filtering** — toggle fork visibility with `f`
 - **1Password integration** — `op://` secret references resolved automatically
 - **Auto-refresh** — configurable polling interval
 
@@ -123,7 +125,12 @@ RENOVATE_REPOSITORY_CACHE=enabled
 |---|---|
 | `m` | Merge selected PR |
 | `M` | Merge all safe PRs in repo |
+| `A` | Merge all PRs in repo |
 | `x` | Close PR + delete branch |
+| `r` | Rebase PR (Renovate comment) |
+| `R` | Rebase all PRs in repo |
+| `e` | Recreate PR (Renovate comment) |
+| `t` | Retry PR (Renovate comment) |
 | `o` | Open PR in browser |
 | `s` | Trigger Renovate sync |
 | `P` | Purge finished jobs |
@@ -133,7 +140,7 @@ RENOVATE_REPOSITORY_CACHE=enabled
 | Key | Action |
 |---|---|
 | `a` | All repos overlay (fuzzy filter) |
-| `R` | Force refresh |
+| `f` | Toggle fork visibility |
 | `?` | Help |
 | `q` | Quit |
 
