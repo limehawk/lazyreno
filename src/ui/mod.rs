@@ -13,6 +13,9 @@ pub mod theme;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
 use theme::Theme;
@@ -21,35 +24,41 @@ use theme::Theme;
 pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let size = frame.area();
 
-    // Bottom bar: footer only. Activity log replaced the flash bar.
+    // Vertical: top bar | main content | footer
     let vert = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3), // status top bar (bordered)
+            Constraint::Min(0),   // main content
+            Constraint::Length(2), // footer (2-line badges)
+        ])
         .split(size);
-    let main_area = vert[0];
-    let footer_area = vert[1];
+    let topbar_area = vert[0];
+    let main_area = vert[1];
+    let footer_area = vert[2];
 
     // Loading state — show centered message before first data arrives.
     if !app.loaded {
         loading::render(frame, main_area, theme);
+        render_topbar(app, frame, topbar_area, theme);
         footer::render(app, frame, footer_area, theme);
         return;
     }
 
-    // Horizontal: sidebar | middle (PRs+detail) | right (system+jobs)
+    // Three columns: sidebar | PRs+detail | jobs+activity
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(20),        // sidebar
             Constraint::Percentage(50), // PRs + detail
-            Constraint::Percentage(25), // system + jobs
+            Constraint::Percentage(25), // jobs + activity
         ])
         .split(main_area);
     let sidebar_area = cols[0];
     let middle_area = cols[1];
     let right_area = cols[2];
 
-    // Middle vertical: PR table | detail (equal height)
+    // Middle vertical: PR table | detail
     let mid_v = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Min(8)])
@@ -57,25 +66,19 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let pr_table_area = mid_v[0];
     let detail_area = mid_v[1];
 
-    // Right vertical: status | jobs | activity (activity matches detail height)
-    let detail_height = detail_area.height;
+    // Right vertical: jobs | activity
     let right_v = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5),            // status
-            Constraint::Min(5),              // jobs (takes remaining)
-            Constraint::Length(detail_height), // activity = detail height
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(right_area);
-    let status_area = right_v[0];
-    let jobs_area = right_v[1];
-    let activity_area = right_v[2];
+    let jobs_area = right_v[0];
+    let activity_area = right_v[1];
 
     // Draw panels.
+    render_topbar(app, frame, topbar_area, theme);
     sidebar::render(app, frame, sidebar_area, theme);
     pr_table::render(app, frame, pr_table_area, theme);
     detail::render(app, frame, detail_area, theme);
-    status::render(app, frame, status_area, theme);
     jobs::render(app, frame, jobs_area, theme);
     activity::render(app, frame, activity_area, theme);
 
@@ -97,6 +100,60 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
         let overlay = centered_rect(40, 20, size);
         confirm::render(app, frame, overlay, theme);
     }
+}
+
+/// Thin status bar: "lazyreno · ● v43.55.4 · Up 16h · Queue: 0 · Running: 0"
+fn render_topbar(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
+    let mut spans = vec![
+        Span::styled("lazyreno", Style::default().fg(theme.accent)),
+        Span::styled(" · ", Style::default().fg(theme.dim)),
+    ];
+
+    if let Some(ref st) = app.system_status {
+        spans.push(Span::styled("● ", Style::default().fg(theme.success)));
+        spans.push(Span::styled(
+            format!("v{}", st.version),
+            Style::default().fg(theme.text),
+        ));
+        spans.push(Span::styled(" · ", Style::default().fg(theme.dim)));
+        spans.push(Span::styled(
+            format!("Up {}", st.uptime),
+            Style::default().fg(theme.muted),
+        ));
+        spans.push(Span::styled(" · ", Style::default().fg(theme.dim)));
+        spans.push(Span::styled(
+            format!(
+                "Queue: {} · Running: {} · Failed: {}",
+                st.queue_size, st.running_jobs, st.failed_jobs
+            ),
+            Style::default().fg(theme.muted),
+        ));
+        if let Some(ref job) = st.last_finished {
+            let dur = job
+                .duration
+                .map(|d| format!(" ({}s)", d.as_secs()))
+                .unwrap_or_default();
+            spans.push(Span::styled(" · ", Style::default().fg(theme.dim)));
+            spans.push(Span::styled(
+                format!("Last: {}{}", job.repo, dur),
+                Style::default().fg(theme.muted),
+            ));
+        }
+    } else {
+        spans.push(Span::styled(
+            "connecting...",
+            Style::default().fg(theme.muted),
+        ));
+    }
+
+    let block = Block::default()
+        .title(" Renovate ")
+        .borders(Borders::ALL)
+        .border_style(theme.border_unfocused);
+
+    let line = Line::from(spans);
+    let paragraph = Paragraph::new(line).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 /// Return a centered `Rect` of the given percentage size within `area`.

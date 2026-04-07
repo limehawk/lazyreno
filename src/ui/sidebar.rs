@@ -24,25 +24,25 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let title = match scroll_indicator {
         Some(ref hint) => Line::from(vec![
             Span::styled(
-                format!(" lazyreno v{version} "),
-                Style::default().fg(theme.accent),
+                format!(" Repos ({total}) "),
+                Style::default().fg(theme.text),
             ),
             hint.clone(),
         ]),
         None => Line::from(Span::styled(
-            format!(" lazyreno v{version} "),
-            Style::default().fg(theme.accent),
+            format!(" Repos ({total}) "),
+            Style::default().fg(theme.text),
         )),
     };
 
-    let repo_count = Line::from(Span::styled(
-        format!(" Repos ({total}) "),
-        Style::default().fg(theme.muted),
+    let app_name = Line::from(Span::styled(
+        format!(" lazyreno v{version} "),
+        Style::default().fg(theme.accent),
     ));
 
     let block = Block::default()
         .title(title)
-        .title_bottom(repo_count)
+        .title_bottom(app_name)
         .borders(Borders::ALL)
         .border_style(border_style);
 

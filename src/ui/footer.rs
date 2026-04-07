@@ -8,53 +8,76 @@ use super::theme::Theme;
 use crate::app::App;
 use crate::types::Panel;
 
-/// Shortcut hints at the bottom. All keys shown always; inactive ones are dimmed.
+/// Context-sensitive shortcut hints with badge-style keys on two lines.
+/// Line 1: action keys (change based on focused panel).
+/// Line 2: navigation and global keys (always shown).
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let on_pr = app.focused_panel == Panel::PrTable;
     let on_pr_or_sidebar = on_pr || app.focused_panel == Panel::Sidebar;
 
-    let key_active = Style::default()
+    let badge_key = Style::default()
         .fg(theme.accent)
+        .bg(theme.badge_bg)
         .add_modifier(Modifier::BOLD);
-    let desc_active = Style::default().fg(theme.muted);
-    let key_dim = Style::default().fg(theme.dim);
-    let desc_dim = Style::default().fg(theme.dim);
-    let sep = Style::default().fg(theme.dim);
+    let desc_style = Style::default().fg(theme.muted);
 
-    // (key, description, active?)
-    let hints: &[(&str, &str, bool)] = &[
-        ("j/k", "navigate", true),
+    // Line 1: action keys (context-sensitive)
+    let actions: &[(&str, &str, bool)] = &[
         ("m", "merge", on_pr),
-        ("M", "merge safe", on_pr),
-        ("A", "merge all", on_pr_or_sidebar),
+        ("M", "safe", on_pr),
+        ("A", "all", on_pr_or_sidebar),
         ("x", "close", on_pr),
         ("r", "rebase", on_pr),
-        ("R", "rebase all", on_pr_or_sidebar),
-        ("o", "browser", on_pr),
+        ("R", "reb-all", on_pr_or_sidebar),
+        ("e", "recreate", on_pr),
+        ("t", "retry", on_pr),
+        ("o", "open", on_pr),
         ("s", "sync", true),
         ("P", "purge", true),
-        ("Tab", "panel", true),
-        ("a", "repos", true),
-        ("f", "forks", true),
-        ("?", "help", true),
-        ("q", "quit", true),
     ];
 
-    let mut spans = Vec::new();
-    for (i, (key, desc, active)) in hints.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::styled(" │ ", sep));
-        }
-        let (ks, ds) = if *active {
-            (key_active, desc_active)
-        } else {
-            (key_dim, desc_dim)
-        };
-        spans.push(Span::styled(*key, ks));
-        spans.push(Span::styled(format!(" {}", desc), ds));
-    }
+    // Line 2: navigation and global keys (always shown)
+    let nav: &[(&str, &str)] = &[
+        ("j/k", "nav"),
+        ("h/l", "panel"),
+        ("g/G", "top/bot"),
+        ("Tab", "cycle"),
+        ("a", "repos"),
+        ("f", "forks"),
+        ("?", "help"),
+        ("q", "quit"),
+    ];
 
-    let line = Line::from(spans);
-    let paragraph = Paragraph::new(line);
+    let line1 = build_active_line(actions, badge_key, desc_style);
+    let line2 = build_always_line(nav, badge_key, desc_style);
+
+    let paragraph = Paragraph::new(vec![line1, line2]);
     frame.render_widget(paragraph, area);
+}
+
+fn build_active_line<'a>(hints: &[(&'a str, &'a str, bool)], badge: Style, desc: Style) -> Line<'a> {
+    let mut spans = Vec::new();
+    for (key, label, active) in hints {
+        if !active {
+            continue;
+        }
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(format!(" {} ", key), badge));
+        spans.push(Span::styled(format!("{} ", label), desc));
+    }
+    Line::from(spans)
+}
+
+fn build_always_line<'a>(hints: &[(&'a str, &'a str)], badge: Style, desc: Style) -> Line<'a> {
+    let mut spans = Vec::new();
+    for (key, label) in hints {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::styled(format!(" {} ", key), badge));
+        spans.push(Span::styled(format!("{} ", label), desc));
+    }
+    Line::from(spans)
 }

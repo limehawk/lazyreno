@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::theme::Theme;
 use crate::app::App;
 
+#[allow(dead_code)]
 pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     let block = Block::default()
         .title(" Renovate ")

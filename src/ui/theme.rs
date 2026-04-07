@@ -12,6 +12,7 @@ pub struct Theme {
     pub major: Color,
     pub minor: Color,
     pub patch: Color,
+    pub badge_bg: Color,
     pub border_focused: Style,
     pub border_unfocused: Style,
 }
@@ -30,6 +31,7 @@ impl Theme {
             major: Color::Red,
             minor: Color::Green,
             patch: Color::Green,
+            badge_bg: Color::Rgb(28, 35, 51),
             border_focused: Style::default().fg(accent),
             border_unfocused: Style::default().fg(Color::DarkGray),
         }
