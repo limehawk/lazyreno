@@ -47,8 +47,17 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
             app.all_repos_selected = 0;
             app.all_repos_filter.clear();
         }
-        KeyCode::Char('R') => {
-            // Refresh is handled in the event loop; noop here.
+        KeyCode::Char('f') => {
+            app.hide_forks = !app.hide_forks;
+            // Rebuild sidebar to reflect the change.
+            app.rebuild_sidebar();
+        }
+        KeyCode::Char('R') if app.focused_panel == Panel::PrTable
+            || app.focused_panel == Panel::Sidebar =>
+        {
+            if let Some(repo) = app.selected_repo_name() {
+                app.confirming = Some(ConfirmAction::RebaseAll(repo.to_string()));
+            }
         }
         KeyCode::Tab => {
             app.focused_panel = app.focused_panel.next();
@@ -117,6 +126,21 @@ fn handle_global_key(app: &mut App, key: KeyEvent) {
                 app.confirming = Some(ConfirmAction::ClosePr(pr.number, repo.to_string()));
             }
         }
+        KeyCode::Char('r') if app.focused_panel == Panel::PrTable => {
+            if let (Some(pr), Some(repo)) = (app.selected_pr(), app.selected_repo_name()) {
+                app.confirming = Some(ConfirmAction::RebasePr(pr.number, repo.to_string()));
+            }
+        }
+        KeyCode::Char('e') if app.focused_panel == Panel::PrTable => {
+            if let (Some(pr), Some(repo)) = (app.selected_pr(), app.selected_repo_name()) {
+                app.confirming = Some(ConfirmAction::RecreatePr(pr.number, repo.to_string()));
+            }
+        }
+        KeyCode::Char('t') if app.focused_panel == Panel::PrTable => {
+            if let (Some(pr), Some(repo)) = (app.selected_pr(), app.selected_repo_name()) {
+                app.confirming = Some(ConfirmAction::RetryPr(pr.number, repo.to_string()));
+            }
+        }
         KeyCode::Char('o') if app.focused_panel == Panel::PrTable => {
             if let Some(pr) = app.selected_pr() {
                 let _ = open::that(&pr.url);
@@ -178,19 +202,32 @@ fn execute_confirmed(app: &mut App, action: ConfirmAction) {
                 app.dispatch_close(number, repo, branch);
             }
         }
+        ConfirmAction::RebasePr(number, repo) => {
+            app.dispatch_renovate_command(number, repo, "/rebase".into());
+        }
+        ConfirmAction::RebaseAll(repo) => {
+            app.dispatch_rebase_all(repo);
+        }
+        ConfirmAction::RecreatePr(number, repo) => {
+            app.dispatch_renovate_command(number, repo, "/recreate".into());
+        }
+        ConfirmAction::RetryPr(number, repo) => {
+            app.dispatch_renovate_command(number, repo, "/retry".into());
+        }
         ConfirmAction::PurgeJobs => {
             app.dispatch_purge();
         }
     }
 }
 
-/// Count of all repos matching the current filter text.
+/// Count of all repos matching the current filter text and fork visibility.
 pub fn filtered_all_repos_len(app: &App) -> usize {
+    let visible = app.visible_all_repos();
     if app.all_repos_filter.is_empty() {
-        return app.all_repos.len();
+        return visible.len();
     }
     let lower = app.all_repos_filter.to_lowercase();
-    app.all_repos
+    visible
         .iter()
         .filter(|r| r.full_name.to_lowercase().contains(&lower))
         .count()
@@ -233,11 +270,13 @@ mod tests {
                 full_name: "org/alpha".into(),
                 name: "alpha".into(),
                 pr_count: 2,
+                fork: false,
             },
             Repo {
                 full_name: "org/beta".into(),
                 name: "beta".into(),
                 pr_count: 1,
+                fork: false,
             },
         ];
         app.prs.insert(
@@ -381,16 +420,19 @@ mod tests {
                 full_name: "org/alpha".into(),
                 name: "alpha".into(),
                 pr_count: 0,
+                fork: false,
             },
             Repo {
                 full_name: "org/beta".into(),
                 name: "beta".into(),
                 pr_count: 0,
+                fork: false,
             },
             Repo {
                 full_name: "org/gamma".into(),
                 name: "gamma".into(),
                 pr_count: 0,
+                fork: false,
             },
         ];
         app.show_all_repos = true;

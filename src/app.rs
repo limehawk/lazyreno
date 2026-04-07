@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::api::github::GithubClient;
+use crate::api::github::{GithubClient, Mergeability};
 use crate::api::renovate::RenovateClient;
 use crate::types::{
     ActionResult, ConfirmAction, FetchResult, FlashMessage, Job, PR, Panel, Repo, SystemStatus,
@@ -31,6 +31,7 @@ pub struct App {
     pub all_repos_filter: String,
     #[allow(dead_code)]
     pub filter_text: String,
+    pub hide_forks: bool,
     pub running: bool,
     pub loaded: bool,
     pub cancel_token: CancellationToken,
@@ -63,6 +64,7 @@ impl App {
             all_repos_selected: 0,
             all_repos_filter: String::new(),
             filter_text: String::new(),
+            hide_forks: true,
             running: true,
             loaded: false,
             cancel_token,
@@ -94,6 +96,14 @@ impl App {
     /// The currently highlighted PR, if any.
     pub fn selected_pr(&self) -> Option<&PR> {
         self.current_prs().get(self.selected_pr)
+    }
+
+    /// All repos with fork filter applied.
+    pub fn visible_all_repos(&self) -> Vec<&Repo> {
+        self.all_repos
+            .iter()
+            .filter(|r| !self.hide_forks || !r.fork)
+            .collect()
     }
 
     // -----------------------------------------------------------------------
@@ -128,6 +138,7 @@ impl App {
         let mut sidebar_repos: Vec<Repo> = self
             .all_repos
             .iter()
+            .filter(|r| !self.hide_forks || !r.fork)
             .filter(|r| {
                 self.prs
                     .get(&r.full_name)
@@ -191,6 +202,11 @@ impl App {
                     "Closed PR #{number} in {repo}"
                 )));
             }
+            ActionResult::PrCommented { repo, number, command } => {
+                self.log_flash(FlashMessage::success(format!(
+                    "Sent {command} to PR #{number} in {repo}"
+                )));
+            }
             ActionResult::AllSafeMerged { repo, count, skipped } => {
                 let mut msg = format!("Merged {count} safe PRs in {repo}");
                 if skipped > 0 {
@@ -202,6 +218,13 @@ impl App {
                 let mut msg = format!("Merged {count} PRs in {repo}");
                 if skipped > 0 {
                     msg.push_str(&format!(", {skipped} not mergeable"));
+                }
+                self.log_flash(FlashMessage::success(msg));
+            }
+            ActionResult::AllRebased { repo, count, failed } => {
+                let mut msg = format!("Rebased {count} PRs in {repo}");
+                if failed > 0 {
+                    msg.push_str(&format!(", {failed} failed"));
                 }
                 self.log_flash(FlashMessage::success(msg));
             }
@@ -333,6 +356,28 @@ impl App {
         }
     }
 
+    /// Rebuild sidebar repos from the full repo list (e.g. after toggling fork filter).
+    pub fn rebuild_sidebar(&mut self) {
+        let mut sidebar_repos: Vec<Repo> = self
+            .all_repos
+            .iter()
+            .filter(|r| !self.hide_forks || !r.fork)
+            .filter(|r| {
+                self.prs
+                    .get(&r.full_name)
+                    .is_some_and(|prs| !prs.is_empty())
+            })
+            .cloned()
+            .map(|mut r| {
+                r.pr_count = self.prs.get(&r.full_name).map(|v| v.len()).unwrap_or(0);
+                r
+            })
+            .collect();
+        sidebar_repos.sort_by(|a, b| a.full_name.to_lowercase().cmp(&b.full_name.to_lowercase()));
+        self.repos = sidebar_repos;
+        self.clamp_selections();
+    }
+
     /// Clear the flash message if it has expired.
     pub fn clear_expired_flash(&mut self) {
         if self.flash.as_ref().is_some_and(|f| f.is_expired()) {
@@ -388,6 +433,56 @@ impl App {
         });
     }
 
+    /// Post a Renovate command comment on a PR (e.g. /rebase, /recreate, /retry).
+    pub fn dispatch_renovate_command(&self, number: u64, repo: String, command: String) {
+        let gh = self.github.clone();
+        let tx = self.action_tx.clone();
+        tokio::spawn(async move {
+            let result = gh.post_comment(&repo, number, &command).await;
+            let action = match result {
+                Ok(()) => ActionResult::PrCommented {
+                    repo,
+                    number,
+                    command,
+                },
+                Err(e) => ActionResult::Error(format!("{command} PR #{number}: {e}")),
+            };
+            let _ = tx.send(action).await;
+        });
+    }
+
+    /// Post /rebase on all PRs for a given repo.
+    pub fn dispatch_rebase_all(&self, repo: String) {
+        let all_prs: Vec<(u64, String)> = self
+            .prs
+            .get(&repo)
+            .map(|prs| prs.iter().map(|pr| (pr.number, pr.repo.clone())).collect())
+            .unwrap_or_default();
+
+        let gh = self.github.clone();
+        let tx = self.action_tx.clone();
+        let repo_name = repo.clone();
+        tokio::spawn(async move {
+            let mut count = 0usize;
+            let mut failed = 0usize;
+
+            for (number, repo) in &all_prs {
+                match gh.post_comment(repo, *number, "/rebase").await {
+                    Ok(()) => count += 1,
+                    Err(_) => failed += 1,
+                }
+            }
+
+            let _ = tx
+                .send(ActionResult::AllRebased {
+                    repo: repo_name,
+                    count,
+                    failed,
+                })
+                .await;
+        });
+    }
+
     /// Merge all safe PRs for a given repo.
     pub fn dispatch_merge_all_safe(&self, repo: String) {
         let safe_prs: Vec<(u64, String)> = self
@@ -408,18 +503,45 @@ impl App {
             let mut merged = 0usize;
             let mut skipped = 0usize;
             let mut errors = Vec::new();
+            let mut remaining = safe_prs;
 
-            for (number, repo) in &safe_prs {
-                match gh.check_mergeable(repo, *number).await {
-                    Ok(true) => match gh.merge_pr(repo, *number).await {
-                        Ok(()) => merged += 1,
+            // Queue-based merge: check once per PR, re-queue unknowns.
+            // Processing other PRs provides the natural delay GitHub needs.
+            for _pass in 0..10 {
+                let mut unknown = Vec::new();
+                let mut made_progress = false;
+
+                for (number, repo) in &remaining {
+                    match gh.check_mergeable_once(repo, *number).await {
+                        Ok(Mergeability::Ready) => match gh.merge_pr(repo, *number).await {
+                            Ok(()) => {
+                                merged += 1;
+                                made_progress = true;
+                                let _ = tx.send(ActionResult::PrMerged {
+                                    repo: repo.clone(),
+                                    number: *number,
+                                }).await;
+                            }
+                            Err(e) => errors.push(format!("#{number}: {e}")),
+                        },
+                        Ok(Mergeability::Conflict) => skipped += 1,
+                        Ok(Mergeability::Unknown) => unknown.push((*number, repo.clone())),
                         Err(e) => errors.push(format!("#{number}: {e}")),
-                    },
-                    Ok(false) => skipped += 1,
-                    Err(e) => errors.push(format!("#{number}: {e}")),
+                    }
+                }
+
+                remaining = unknown;
+                if remaining.is_empty() {
+                    break;
+                }
+                if !made_progress {
+                    // No merges this pass — GitHub may still be computing.
+                    // Brief wait before retrying unknowns.
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 }
             }
 
+            skipped += remaining.len();
             let action = if errors.is_empty() {
                 ActionResult::AllSafeMerged {
                     repo: repo_name,
@@ -460,30 +582,56 @@ impl App {
         let repo_name = repo.clone();
         tokio::spawn(async move {
             let mut merged = 0usize;
-            let mut skipped = Vec::new();
+            let mut skipped = 0usize;
             let mut errors = Vec::new();
+            let mut remaining = all_prs;
 
-            for (number, repo) in &all_prs {
-                match gh.check_mergeable(repo, *number).await {
-                    Ok(true) => match gh.merge_pr(repo, *number).await {
-                        Ok(()) => merged += 1,
+            // Queue-based merge: check once per PR, re-queue unknowns.
+            // Processing other PRs provides the natural delay GitHub needs.
+            for _pass in 0..10 {
+                let mut unknown = Vec::new();
+                let mut made_progress = false;
+
+                for (number, repo) in &remaining {
+                    match gh.check_mergeable_once(repo, *number).await {
+                        Ok(Mergeability::Ready) => match gh.merge_pr(repo, *number).await {
+                            Ok(()) => {
+                                merged += 1;
+                                made_progress = true;
+                                let _ = tx.send(ActionResult::PrMerged {
+                                    repo: repo.clone(),
+                                    number: *number,
+                                }).await;
+                            }
+                            Err(e) => errors.push(format!("#{number}: {e}")),
+                        },
+                        Ok(Mergeability::Conflict) => skipped += 1,
+                        Ok(Mergeability::Unknown) => unknown.push((*number, repo.clone())),
                         Err(e) => errors.push(format!("#{number}: {e}")),
-                    },
-                    Ok(false) => skipped.push(format!("#{number}")),
-                    Err(e) => errors.push(format!("#{number}: {e}")),
+                    }
+                }
+
+                remaining = unknown;
+                if remaining.is_empty() {
+                    break;
+                }
+                if !made_progress {
+                    // No merges this pass — GitHub may still be computing.
+                    // Brief wait before retrying unknowns.
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 }
             }
 
+            skipped += remaining.len();
             let action = if errors.is_empty() {
                 ActionResult::AllMerged {
                     repo: repo_name.clone(),
                     count: merged,
-                    skipped: skipped.len(),
+                    skipped,
                 }
             } else {
                 ActionResult::Error(format!(
-                    "Merged {merged}, skipped {}, failed {}: {}",
-                    skipped.len(),
+                    "Merged {merged}, skipped {skipped}, failed {}: {}",
                     errors.len(),
                     errors.join("; ")
                 ))
@@ -580,6 +728,7 @@ mod tests {
             full_name: "org/alpha".into(),
             name: "alpha".into(),
             pr_count: 1,
+            fork: false,
         });
         assert_eq!(app.selected_repo_name(), Some("org/alpha"));
     }
@@ -591,6 +740,7 @@ mod tests {
             full_name: "org/repo".into(),
             name: "repo".into(),
             pr_count: 2,
+            fork: false,
         });
         app.prs.insert(
             "org/repo".into(),
@@ -607,16 +757,19 @@ mod tests {
                 full_name: "org/a".into(),
                 name: "a".into(),
                 pr_count: 1,
+                fork: false,
             },
             Repo {
                 full_name: "org/b".into(),
                 name: "b".into(),
                 pr_count: 1,
+                fork: false,
             },
             Repo {
                 full_name: "org/c".into(),
                 name: "c".into(),
                 pr_count: 1,
+                fork: false,
             },
         ];
         assert_eq!(app.selected_repo, 0);
@@ -648,6 +801,7 @@ mod tests {
             full_name: "org/repo".into(),
             name: "repo".into(),
             pr_count: 2,
+            fork: false,
         });
         app.prs.insert(
             "org/repo".into(),
@@ -671,6 +825,7 @@ mod tests {
             full_name: "org/repo".into(),
             name: "repo".into(),
             pr_count: 1,
+            fork: false,
         });
         app.prs
             .insert("org/repo".into(), vec![make_pr(1, "org/repo")]);
@@ -691,16 +846,19 @@ mod tests {
                 full_name: "org/a".into(),
                 name: "a".into(),
                 pr_count: 1,
+                fork: false,
             },
             Repo {
                 full_name: "org/b".into(),
                 name: "b".into(),
                 pr_count: 1,
+                fork: false,
             },
             Repo {
                 full_name: "org/c".into(),
                 name: "c".into(),
                 pr_count: 1,
+                fork: false,
             },
         ];
 

@@ -11,9 +11,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
     frame.render_widget(Clear, area);
 
     let filter = app.all_repos_filter.to_lowercase();
-    let filtered: Vec<(usize, &crate::types::Repo)> = app
-        .all_repos
-        .iter()
+    let visible = app.visible_all_repos();
+    let filtered: Vec<(usize, &crate::types::Repo)> = visible
+        .into_iter()
         .filter(|r| filter.is_empty() || r.full_name.to_lowercase().contains(&filter))
         .enumerate()
         .collect();

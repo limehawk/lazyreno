@@ -9,6 +9,7 @@ pub struct Repo {
     pub full_name: String,
     pub name: String,
     pub pr_count: usize,
+    pub fork: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +221,10 @@ pub enum ConfirmAction {
     MergeAllSafe(String),
     MergeAll(String),
     ClosePr(u64, String),
+    RebasePr(u64, String),
+    RebaseAll(String),
+    RecreatePr(u64, String),
+    RetryPr(u64, String),
     PurgeJobs,
 }
 
@@ -237,6 +242,18 @@ impl fmt::Display for ConfirmAction {
             }
             ConfirmAction::ClosePr(num, repo) => {
                 write!(f, "Close PR #{} in {}?", num, repo)
+            }
+            ConfirmAction::RebasePr(num, repo) => {
+                write!(f, "Rebase PR #{} in {}?", num, repo)
+            }
+            ConfirmAction::RebaseAll(repo) => {
+                write!(f, "Rebase ALL PRs in {}?", repo)
+            }
+            ConfirmAction::RecreatePr(num, repo) => {
+                write!(f, "Recreate PR #{} in {}?", num, repo)
+            }
+            ConfirmAction::RetryPr(num, repo) => {
+                write!(f, "Retry PR #{} in {}?", num, repo)
             }
             ConfirmAction::PurgeJobs => write!(f, "Purge all finished jobs?"),
         }
@@ -281,8 +298,10 @@ pub enum FlashLevel {
 pub enum ActionResult {
     PrMerged { repo: String, number: u64 },
     PrClosed { repo: String, number: u64 },
+    PrCommented { repo: String, number: u64, command: String },
     AllSafeMerged { repo: String, count: usize, skipped: usize },
     AllMerged { repo: String, count: usize, skipped: usize },
+    AllRebased { repo: String, count: usize, failed: usize },
     SyncTriggered,
     JobsPurged,
     Error(String),

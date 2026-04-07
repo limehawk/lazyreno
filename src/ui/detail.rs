@@ -72,7 +72,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "[m]erge [c]lose [o]pen",
+                "[m]erge [x]close [o]pen [r]ebase [e]recreate re[t]ry",
                 Style::default().fg(theme.dim),
             )),
         ];

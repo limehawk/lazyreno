@@ -5,6 +5,17 @@ use serde::Deserialize;
 
 use crate::types::{PR, Repo, UpdateType};
 
+/// Three-way mergeable status for batch merge operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mergeability {
+    /// PR can be merged now.
+    Ready,
+    /// PR has conflicts — won't resolve without intervention.
+    Conflict,
+    /// GitHub hasn't computed mergeability yet — may become ready.
+    Unknown,
+}
+
 /// Minimal combined-status response for commit status checks.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -111,9 +122,9 @@ impl GithubClient {
     pub async fn list_repos(&self) -> Result<Vec<Repo>> {
         // Use the authenticated /user/repos endpoint so private repos are
         // included, then filter to the configured owner.
-        let url = "https://api.github.com/user/repos?type=sources".to_string();
+        let url = "https://api.github.com/user/repos".to_string();
         let items: Vec<serde_json::Value> = self
-            .get_paginated(&url, '&')
+            .get_paginated(&url, '?')
             .await
             .context("listing repos")?;
 
@@ -147,10 +158,15 @@ impl GithubClient {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("{}/{}", self.owner, name));
+                let fork = r
+                    .get("fork")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 Repo {
                     name,
                     full_name,
                     pr_count: 0,
+                    fork,
                 }
             })
             .collect();
@@ -224,9 +240,9 @@ impl GithubClient {
         let (owner, repo) = self.split_repo(repo_name);
         let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
 
-        for attempt in 0..4 {
+        for attempt in 0..5 {
             if attempt > 0 {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
             let pr: GhPullRequest = self
                 .client
@@ -243,6 +259,31 @@ impl GithubClient {
         }
         // After retries, treat unknown as not mergeable.
         Ok(false)
+    }
+
+    /// Single-shot mergeable check — no retries. Returns three-way result
+    /// so batch callers can distinguish "has conflicts" from "not computed yet".
+    pub async fn check_mergeable_once(
+        &self,
+        repo_name: &str,
+        number: u64,
+    ) -> Result<Mergeability> {
+        let (owner, repo) = self.split_repo(repo_name);
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+        let pr: GhPullRequest = self
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("fetching PR #{number} in {owner}/{repo}"))?
+            .json()
+            .await?;
+        Ok(match pr.mergeable {
+            Some(true) => Mergeability::Ready,
+            Some(false) => Mergeability::Conflict,
+            None => Mergeability::Unknown,
+        })
     }
 
     /// Merge a PR using the merge method.
@@ -277,6 +318,21 @@ impl GithubClient {
             .await?
             .error_for_status()
             .with_context(|| format!("closing PR #{number} in {owner}/{repo}"))?;
+        Ok(())
+    }
+
+    /// Post a comment on a PR (used for Renovate commands like /rebase).
+    pub async fn post_comment(&self, repo_name: &str, number: u64, body: &str) -> Result<()> {
+        let (owner, repo) = self.split_repo(repo_name);
+        let url =
+            format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments");
+        self.client
+            .post(&url)
+            .json(&serde_json::json!({ "body": body }))
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("commenting on PR #{number} in {owner}/{repo}"))?;
         Ok(())
     }
 
