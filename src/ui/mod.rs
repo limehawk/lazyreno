@@ -45,18 +45,27 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
         return;
     }
 
-    // Three columns: sidebar | PRs+detail | jobs+activity
+    // Vertical: upper (sidebar + PRs + detail) | bottom log strip
+    let body = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(10),       // upper panels
+            Constraint::Length(10),    // bottom log strip
+        ])
+        .split(main_area);
+    let upper_area = body[0];
+    let bottom_area = body[1];
+
+    // Upper: sidebar | PRs + detail
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(20),        // sidebar
-            Constraint::Percentage(50), // PRs + detail
-            Constraint::Percentage(25), // jobs + activity
+            Constraint::Percentage(60), // PRs + detail
         ])
-        .split(main_area);
+        .split(upper_area);
     let sidebar_area = cols[0];
     let middle_area = cols[1];
-    let right_area = cols[2];
 
     // Middle vertical: PR table | detail
     let mid_v = Layout::default()
@@ -66,13 +75,16 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let pr_table_area = mid_v[0];
     let detail_area = mid_v[1];
 
-    // Right vertical: jobs | activity
-    let right_v = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(right_area);
-    let jobs_area = right_v[0];
-    let activity_area = right_v[1];
+    // Bottom strip: activity | jobs
+    let bottom_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(60), // activity (chattier)
+            Constraint::Percentage(40), // jobs
+        ])
+        .split(bottom_area);
+    let activity_area = bottom_cols[0];
+    let jobs_area = bottom_cols[1];
 
     // Draw panels.
     render_topbar(app, frame, topbar_area, theme);
