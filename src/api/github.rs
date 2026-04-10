@@ -45,6 +45,8 @@ struct GhLabel {
 struct GhRef {
     #[serde(rename = "ref")]
     ref_field: String,
+    #[serde(default)]
+    sha: String,
 }
 
 pub struct GithubClient {
@@ -204,6 +206,7 @@ impl GithubClient {
                     repo: full_name.clone(),
                     branch: pr.head.ref_field,
                     base: pr.base.ref_field,
+                    head_sha: pr.head.sha,
                     url: pr.html_url.unwrap_or_default(),
                     created_at: pr.created_at.unwrap_or_else(Utc::now),
                     update_type,
@@ -217,7 +220,6 @@ impl GithubClient {
     }
 
     /// Check if all combined commit statuses pass for a given SHA.
-    #[allow(dead_code)]
     pub async fn get_checks_pass(&self, repo_name: &str, sha: &str) -> Result<bool> {
         let (owner, repo) = self.split_repo(repo_name);
         let url = format!("https://api.github.com/repos/{owner}/{repo}/commits/{sha}/status");

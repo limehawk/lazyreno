@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crossterm::event::{self, Event as CrosstermEvent, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, MouseEvent};
 use tokio::sync::mpsc;
 
 use crate::types::{ActionResult, FetchResult};
@@ -10,6 +10,7 @@ use crate::types::{ActionResult, FetchResult};
 /// into a single stream the main loop can select on.
 pub enum AppEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     #[allow(dead_code)]
     Resize(u16, u16),
     Tick,
@@ -50,6 +51,7 @@ impl EventHandler {
                             if let Ok(evt) = event::read() {
                                 let app_evt = match evt {
                                     CrosstermEvent::Key(key) => AppEvent::Key(key),
+                                    CrosstermEvent::Mouse(mouse) => AppEvent::Mouse(mouse),
                                     CrosstermEvent::Resize(w, h) => AppEvent::Resize(w, h),
                                     _ => continue,
                                 };
@@ -103,5 +105,10 @@ impl EventHandler {
     /// Returns `None` when all senders have been dropped.
     pub async fn next(&mut self) -> Option<AppEvent> {
         self.rx.recv().await
+    }
+
+    /// Non-blocking poll for a buffered event. Used to drain scroll bursts.
+    pub fn try_next(&mut self) -> Option<AppEvent> {
+        self.rx.try_recv().ok()
     }
 }

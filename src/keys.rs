@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 use crate::app::App;
 use crate::types::{ConfirmAction, Panel};
@@ -220,6 +220,32 @@ fn execute_confirmed(app: &mut App, action: ConfirmAction) {
     }
 }
 
+/// Handle mouse events (scroll wheel).
+pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
+    match mouse.kind {
+        MouseEventKind::ScrollDown => {
+            if app.show_all_repos {
+                let len = filtered_all_repos_len(app);
+                if len > 0 && app.all_repos_selected < len - 1 {
+                    app.all_repos_selected += 1;
+                }
+            } else if !app.show_help {
+                app.move_selection_down();
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if app.show_all_repos {
+                if app.all_repos_selected > 0 {
+                    app.all_repos_selected -= 1;
+                }
+            } else if !app.show_help {
+                app.move_selection_up();
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Count of all repos matching the current filter text and fork visibility.
 pub fn filtered_all_repos_len(app: &App) -> usize {
     let visible = app.visible_all_repos();
@@ -288,6 +314,7 @@ mod tests {
                     repo: "org/alpha".into(),
                     branch: "renovate/dep-1".into(),
                     base: "main".into(),
+                    head_sha: "aaa".into(),
                     url: "https://github.com/org/alpha/pull/1".into(),
                     created_at: Utc::now(),
                     update_type: UpdateType::Minor,
@@ -300,6 +327,7 @@ mod tests {
                     repo: "org/alpha".into(),
                     branch: "renovate/dep-2".into(),
                     base: "main".into(),
+                    head_sha: "bbb".into(),
                     url: "https://github.com/org/alpha/pull/2".into(),
                     created_at: Utc::now(),
                     update_type: UpdateType::Major,
@@ -316,6 +344,7 @@ mod tests {
                 repo: "org/beta".into(),
                 branch: "renovate/dep-10".into(),
                 base: "main".into(),
+                head_sha: "ccc".into(),
                 url: "https://github.com/org/beta/pull/10".into(),
                 created_at: Utc::now(),
                 update_type: UpdateType::Patch,

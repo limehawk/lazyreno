@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::api::github::GithubClient;
 use crate::api::renovate::RenovateClient;
@@ -12,6 +12,9 @@ use crate::types::{FetchResult, PR, Repo};
 
 /// Maximum concurrent PR-fetch tasks per cycle.
 const MAX_CONCURRENT_PR_FETCHES: usize = 5;
+
+/// Maximum concurrent enrichment tasks (mergeable + checks) per cycle.
+const MAX_CONCURRENT_ENRICHMENTS: usize = 5;
 
 /// Run the background fetch loop. Sends a `FetchResult` on each tick.
 /// Exits when the cancellation token fires or the receiver is dropped.
@@ -102,6 +105,9 @@ async fn fetch_all_prs(
         }
     }
 
+    // Enrich PRs with mergeable + checks status (best-effort, bounded concurrency).
+    enrich_prs(&github, &mut map).await;
+
     if errors.is_empty() {
         Ok(map)
     } else {
@@ -110,5 +116,64 @@ async fn fetch_all_prs(
         // missing repos. If ALL failed, still return what we have (empty map).
         // We log errors above; return Ok so partial data is usable.
         Ok(map)
+    }
+}
+
+/// Enrich PRs with mergeable status and checks pass (one-shot, no retries).
+/// Failures are silently ignored — fields stay `None`.
+async fn enrich_prs(github: &Arc<GithubClient>, prs_by_repo: &mut HashMap<String, Vec<PR>>) {
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_ENRICHMENTS));
+
+    // Collect all (repo, number, sha) tuples for enrichment.
+    let targets: Vec<(String, u64, String)> = prs_by_repo
+        .values()
+        .flat_map(|prs| {
+            prs.iter()
+                .map(|pr| (pr.repo.clone(), pr.number, pr.head_sha.clone()))
+        })
+        .collect();
+
+    // Spawn enrichment tasks.
+    let mut handles = Vec::with_capacity(targets.len());
+    for (repo, number, sha) in &targets {
+        let gh = github.clone();
+        let sem = semaphore.clone();
+        let repo = repo.clone();
+        let number = *number;
+        let sha = sha.clone();
+
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await;
+            let mergeable = gh.check_mergeable_once(&repo, number).await.ok();
+            let checks = if sha.is_empty() {
+                None
+            } else {
+                gh.get_checks_pass(&repo, &sha).await.ok()
+            };
+            (repo, number, mergeable, checks)
+        }));
+    }
+
+    // Collect results and update PRs in place.
+    for handle in handles {
+        match handle.await {
+            Ok((repo, number, mergeable, checks)) => {
+                if let Some(prs) = prs_by_repo.get_mut(&repo) {
+                    if let Some(pr) = prs.iter_mut().find(|p| p.number == number) {
+                        if let Some(m) = mergeable {
+                            pr.mergeable = match m {
+                                crate::api::github::Mergeability::Ready => Some(true),
+                                crate::api::github::Mergeability::Conflict => Some(false),
+                                crate::api::github::Mergeability::Unknown => None,
+                            };
+                        }
+                        pr.checks_pass = checks;
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "enrichment task panicked");
+            }
+        }
     }
 }

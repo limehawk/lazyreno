@@ -28,6 +28,7 @@ pub fn render(_app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
         Line::from(Span::styled("  Tab          Next panel", plain)),
         Line::from(Span::styled("  h/l          Prev/next panel", plain)),
         Line::from(Span::styled("  Enter        Focus PR table", plain)),
+        Line::from(Span::styled("  Scroll       Mouse scroll", plain)),
         Line::from(""),
         Line::from(Span::styled("Actions", accent)),
         Line::from(Span::styled("  m            Merge PR", plain)),

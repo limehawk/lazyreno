@@ -13,6 +13,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture, MouseEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -102,7 +103,7 @@ async fn run_tui(
     action_rx: mpsc::Receiver<types::ActionResult>,
 ) -> Result<()> {
     enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen)?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
@@ -125,12 +126,25 @@ async fn run_tui(
         })?;
 
         if let Some(event) = events.next().await {
-            match event {
-                AppEvent::Key(key) => keys::handle_key(app, key),
-                AppEvent::FetchComplete(result) => app.apply_fetch(*result),
-                AppEvent::ActionComplete(result) => app.apply_action(result),
-                AppEvent::Resize(_, _) => {} // ratatui handles via draw
-                AppEvent::Tick => {}         // just re-render
+            let is_scroll = matches!(
+                &event,
+                AppEvent::Mouse(m) if matches!(m.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp)
+            );
+            process_event(app, event);
+
+            // Coalesce buffered scroll events so terminal multipliers
+            // (e.g. Kitty's wheel_scroll_multiplier) don't cause jumps.
+            if is_scroll {
+                loop {
+                    match events.try_next() {
+                        Some(evt) if matches!(
+                            &evt,
+                            AppEvent::Mouse(m) if matches!(m.kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp)
+                        ) => continue,
+                        Some(evt) => { process_event(app, evt); break; }
+                        None => break,
+                    }
+                }
             }
         }
     }
@@ -138,8 +152,18 @@ async fn run_tui(
     Ok(())
 }
 
+fn process_event(app: &mut App, event: AppEvent) {
+    match event {
+        AppEvent::Key(key) => keys::handle_key(app, key),
+        AppEvent::Mouse(mouse) => keys::handle_mouse(app, mouse),
+        AppEvent::FetchComplete(result) => app.apply_fetch(*result),
+        AppEvent::ActionComplete(result) => app.apply_action(result),
+        AppEvent::Resize(_, _) | AppEvent::Tick => {}
+    }
+}
+
 fn restore_terminal() -> Result<()> {
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
     Ok(())
 }

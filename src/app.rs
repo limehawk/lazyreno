@@ -707,6 +707,7 @@ mod tests {
             repo: repo.into(),
             branch: "renovate/test".into(),
             base: "main".into(),
+            head_sha: "abc123".into(),
             url: format!("https://github.com/{repo}/pull/{number}"),
             created_at: Utc::now(),
             update_type: UpdateType::Minor,

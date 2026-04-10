@@ -27,8 +27,9 @@ lazyreno puts everything in one keyboard-driven TUI. See every PR across every r
 - **Queue-based merging** — handles GitHub's lazy mergeability computation automatically, no repeated retries
 - **Renovate commands** — `r` rebase, `e` recreate, `t` retry — posts comments directly to PRs
 - **Job monitoring** — live view of running/pending Renovate jobs with queue depth
-- **Vim navigation** — `hjkl`, `g`/`G`, `Ctrl+u`/`Ctrl+d`, context-sensitive hints
-- **Fuzzy repo filter** — `a` opens a searchable overlay across all repos
+- **Vim navigation** — `hjkl`, `g`/`G`, `Ctrl+u`/`Ctrl+d`, mouse scroll, context-sensitive hints
+- **PR status** — checks pass and mergeable status fetched per PR, displayed in table + detail
+- **Fuzzy repo filter** — `a` opens a searchable overlay with scrollbar across all repos
 - **Fork filtering** — `f` toggles fork visibility (hidden by default)
 - **1Password integration** — `op://` secret references resolved automatically via `op` CLI
 - **Auto-refresh** — configurable polling interval with real-time activity log
@@ -128,6 +129,7 @@ RENOVATE_REPOSITORY_CACHE=enabled
 | `Ctrl+u` / `Ctrl+d` | Half page up / down |
 | `Tab` / `Shift+Tab` | Cycle panel focus |
 | `Enter` | Focus PR table from sidebar |
+| Mouse scroll | Scroll lists (sidebar, PR table, overlays) |
 
 ### Actions
 
