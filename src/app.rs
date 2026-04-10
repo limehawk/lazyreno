@@ -20,6 +20,8 @@ pub struct App {
     pub selected_pr: usize,
     pub focused_panel: Panel,
     pub system_status: Option<SystemStatus>,
+    /// GitHub API connection state: Ok(total_repo_count) or Err(message).
+    pub github_status: Option<Result<usize, String>>,
     pub jobs: Vec<Job>,
     pub flash: Option<FlashMessage>,
     pub activity_log: Vec<FlashMessage>,
@@ -54,6 +56,7 @@ impl App {
             selected_pr: 0,
             focused_panel: Panel::Sidebar,
             system_status: None,
+            github_status: None,
             jobs: Vec::new(),
             flash: None,
             activity_log: Vec::new(),
@@ -115,11 +118,13 @@ impl App {
         // Repos — store all repos for the overlay, filter to PR-bearing for sidebar.
         match result.repos {
             Ok(repos) => {
+                self.github_status = Some(Ok(repos.len()));
                 self.all_repos = repos;
             }
             Err(e) => {
                 error!(error = %e, "fetch repos failed");
-                self.flash = Some(FlashMessage::error(format!("Repo fetch: {e}")));
+                self.github_status = Some(Err(format!("{e}")));
+                self.log_flash(FlashMessage::error(format!("GitHub: {e}")));
             }
         }
 

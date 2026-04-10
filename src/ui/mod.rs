@@ -28,7 +28,7 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     let vert = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // status top bar (bordered)
+            Constraint::Length(4), // status top bar (bordered, 2 content lines)
             Constraint::Min(0),   // main content
             Constraint::Length(2), // footer (2-line badges)
         ])
@@ -114,26 +114,27 @@ pub fn render(app: &App, frame: &mut Frame, theme: &Theme) {
     }
 }
 
-/// Thin status bar: "lazyreno · ● v43.55.4 · Up 16h · Queue: 0 · Running: 0"
+/// Two-line top bar: Renovate stats on line 1, GitHub stats on line 2.
 fn render_topbar(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
-    let mut spans = vec![
-        Span::styled("lazyreno", Style::default().fg(theme.accent)),
-        Span::styled(" · ", Style::default().fg(theme.dim)),
-    ];
+    let sep = Span::styled(" · ", Style::default().fg(theme.dim));
 
+    // Line 1: Renovate
+    let mut rn = vec![
+        Span::styled("Renovate  ", Style::default().fg(theme.muted)),
+    ];
     if let Some(ref st) = app.system_status {
-        spans.push(Span::styled("● ", Style::default().fg(theme.success)));
-        spans.push(Span::styled(
+        rn.push(Span::styled("● ", Style::default().fg(theme.success)));
+        rn.push(Span::styled(
             format!("v{}", st.version),
             Style::default().fg(theme.text),
         ));
-        spans.push(Span::styled(" · ", Style::default().fg(theme.dim)));
-        spans.push(Span::styled(
+        rn.push(sep.clone());
+        rn.push(Span::styled(
             format!("Up {}", st.uptime),
             Style::default().fg(theme.muted),
         ));
-        spans.push(Span::styled(" · ", Style::default().fg(theme.dim)));
-        spans.push(Span::styled(
+        rn.push(sep.clone());
+        rn.push(Span::styled(
             format!(
                 "Queue: {} · Running: {} · Failed: {}",
                 st.queue_size, st.running_jobs, st.failed_jobs
@@ -145,26 +146,66 @@ fn render_topbar(app: &App, frame: &mut Frame, area: Rect, theme: &Theme) {
                 .duration
                 .map(|d| format!(" ({}s)", d.as_secs()))
                 .unwrap_or_default();
-            spans.push(Span::styled(" · ", Style::default().fg(theme.dim)));
-            spans.push(Span::styled(
+            rn.push(sep.clone());
+            rn.push(Span::styled(
                 format!("Last: {}{}", job.repo, dur),
                 Style::default().fg(theme.muted),
             ));
         }
     } else {
-        spans.push(Span::styled(
-            "connecting...",
-            Style::default().fg(theme.muted),
-        ));
+        rn.push(Span::styled("● ", Style::default().fg(theme.muted)));
+        rn.push(Span::styled("connecting…", Style::default().fg(theme.muted)));
+    }
+
+    // Line 2: GitHub
+    let mut gh = vec![
+        Span::styled("GitHub    ", Style::default().fg(theme.muted)),
+    ];
+    match &app.github_status {
+        Some(Ok(count)) => {
+            gh.push(Span::styled("● ", Style::default().fg(theme.success)));
+            gh.push(Span::styled(
+                &app.github.owner,
+                Style::default().fg(theme.text),
+            ));
+            gh.push(sep.clone());
+            gh.push(Span::styled(
+                format!("{count} repos"),
+                Style::default().fg(theme.muted),
+            ));
+            let total_prs: usize = app.prs.values().map(|v| v.len()).sum();
+            gh.push(sep.clone());
+            gh.push(Span::styled(
+                format!("{total_prs} open PRs"),
+                Style::default().fg(theme.muted),
+            ));
+        }
+        Some(Err(msg)) => {
+            gh.push(Span::styled("● ", Style::default().fg(theme.error)));
+            let hint = if msg.contains("401") {
+                "bad token — check LAZYRENO_GITHUB_TOKEN"
+            } else if msg.contains("403") {
+                "forbidden — token may lack repo scope"
+            } else if msg.contains("404") {
+                "not found"
+            } else {
+                "fetch failed — check network"
+            };
+            gh.push(Span::styled(hint, Style::default().fg(theme.error)));
+        }
+        None => {
+            gh.push(Span::styled("● ", Style::default().fg(theme.muted)));
+            gh.push(Span::styled("connecting…", Style::default().fg(theme.muted)));
+        }
     }
 
     let block = Block::default()
-        .title(" Renovate ")
+        .title(Span::styled(" lazyreno ", Style::default().fg(theme.accent)))
         .borders(Borders::ALL)
         .border_style(theme.border_unfocused);
 
-    let line = Line::from(spans);
-    let paragraph = Paragraph::new(line).block(block);
+    let text = vec![Line::from(rn), Line::from(gh)];
+    let paragraph = Paragraph::new(text).block(block);
     frame.render_widget(paragraph, area);
 }
 

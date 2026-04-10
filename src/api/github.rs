@@ -51,7 +51,7 @@ struct GhRef {
 
 pub struct GithubClient {
     client: Client,
-    owner: String,
+    pub owner: String,
 }
 
 impl GithubClient {
