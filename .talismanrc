@@ -1,7 +1,0 @@
-threshold: medium
-fileignoreconfig:
-  - filename: Cargo.lock
-    ignore_detectors:
-      - filecontent
-  - filename: PKGBUILD
-    checksum: f9edbd8ff5aaae78703482bf59211b949d1614f565463cbef18e9b7116dd4071
