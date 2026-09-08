@@ -4,6 +4,7 @@ dist/
 pkg/
 *.pkg.tar.zst
 CLAUDE.md
+AGENTS.md
 docs/
 playground-*
 .talismanrc
