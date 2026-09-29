@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      push_image:
+        description: Push an OCI image to GHCR (tagged with the commit SHA)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.98.1
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config libssl-dev
+
+      - name: Install Rust
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --target "$TARGET"
+
+      # Release builds deliberately do not restore shared dependency caches.
+      - name: Test
+        run: cargo +"$RUST_VERSION" test --locked --target "$TARGET"
+
+      - name: Build binary
+        run: cargo +"$RUST_VERSION" build --release --locked --target "$TARGET" --bin lazyreno
+
+      - name: Smoke test binary
+        run: |
+          binary="target/$TARGET/release/lazyreno"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            binary="${binary}.exe"
+          fi
+          "$binary" --version
+          "$binary" --help
+
+      - name: Package binary and checksum
+        shell: python
+        run: |
+          import hashlib
+          import os
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          target = os.environ["TARGET"]
+          windows = os.environ["RUNNER_OS"] == "Windows"
+          binary = Path("target") / target / "release" / ("lazyreno.exe" if windows else "lazyreno")
+          files = [binary, Path("LICENSE"), Path("README.md")]
+          dist = Path("dist")
+          dist.mkdir()
+          suffix = ".zip" if windows else ".tar.gz"
+          archive = dist / f"lazyreno-{target}{suffix}"
+          if windows:
+              with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
+                  for path in files:
+                      output.write(path, arcname=path.name)
+          else:
+              with tarfile.open(archive, "w:gz") as output:
+                  for path in files:
+                      output.add(path, arcname=path.name)
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          archive.with_name(archive.name + ".sha256").write_bytes(
+              f"{digest}  {archive.name}\n".encode("utf-8")
+          )
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lazyreno-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  release-assets:
+    name: Attach binaries to release
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # Attach assets to the published release.
+    steps:
+      - name: Download this run's binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: lazyreno-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify checksums and upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          cat dist/*.sha256 > dist/SHA256SUMS
+          (cd dist && sha256sum --check SHA256SUMS)
+          gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --clobber
+
+  container:
+    name: Build and push OCI image
+    if: github.event_name == 'release' || inputs.push_image
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write # Push the OCI image to GHCR.
+    steps:
+      - name: Check out the event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+          cache-image: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          tags: |
+            type=ref,event=tag,enable=${{ github.event_name == 'release' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.description=TUI dashboard for Renovate CE
+            org.opencontainers.image.licenses=MIT
+          annotations: |
+            org.opencontainers.image.description=TUI dashboard for Renovate CE
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: true
+          sbom: true

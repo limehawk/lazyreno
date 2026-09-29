@@ -1,0 +1,6 @@
+# Only source and Cargo metadata belong in the build context.
+**
+!Cargo.toml
+!Cargo.lock
+!src/
+!src/**
