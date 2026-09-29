@@ -66,7 +66,46 @@ cp target/release/lazyreno ~/.local/bin/
 
 ### Releases
 
-Pre-built binaries on the [releases page](https://github.com/limehawk/lazyreno/releases).
+Pre-built binaries on this fork's [releases page](https://github.com/kquinsland01/lazyreno/releases).
+
+The **Release** workflow builds Linux and macOS binaries for x86-64 and ARM64,
+and Windows binaries for x86-64. Publishing a release (including a prerelease)
+attaches `.tar.gz` archives for Linux/macOS, a `.zip` for Windows, and a
+`SHA256SUMS` file. Each archive contains the binary, README, and license.
+Linux binaries require glibc 2.39 or newer and OpenSSL 3 (for example, Ubuntu 24.04).
+
+To build without publishing a release, open **Actions → Release → Run workflow**
+and select a branch or tag. Download the `lazyreno-<target>` artifacts from the
+completed run; they are retained for 14 days and include SHA-256 checksums.
+
+### Container
+
+Releases also publish a Linux amd64/arm64 image to `ghcr.io/<owner>/<repository>`
+using the repository running the workflow. Images are tagged with the release
+tag and `sha-<full-commit-sha>`; stable releases also update `latest`.
+Prereleases do not update `latest`. Manual runs can enable **push_image** to
+publish only the commit SHA tag.
+
+For this fork:
+
+```bash
+docker run --rm -it \
+  --mount type=bind,src="$HOME/.config/lazyreno",dst=/config,readonly \
+  -e LAZYRENO_GITHUB_TOKEN -e LAZYRENO_RENOVATE_SECRET \
+  ghcr.io/kquinsland01/lazyreno:latest --config /config/config.toml
+```
+
+The image runs as UID/GID `10001:10001`; the mounted configuration must be
+readable by that user. It includes CA certificates and OpenSSL, but not the
+1Password CLI or a browser. Resolve `op://` secrets on the host and pass them
+through the environment variables above when using the image.
+
+To build the image locally, run `docker build -t lazyreno .`.
+Publishing uses the workflow's built-in `GITHUB_TOKEN` with `packages: write`;
+no extra registry secret is needed. Set the GHCR package visibility to public
+if you want unauthenticated pulls. The workflow must be merged into the default
+branch before its manual trigger appears, and present in the commit being
+released for release builds.
 
 ## Configuration
 
